@@ -152,19 +152,19 @@ private:
     std::vector<uint8_t> parms_;
 };
 
-class Client: public std::enable_shared_from_this<Client>
+class Channel: public std::enable_shared_from_this<Channel>
 {
 public:
     static std::chrono::seconds maxBackoff;
 
-    /// Create an RPC client for the given (prog, vers) pair.
-    Client(uint32_t prog, uint32_t vers, std::unique_ptr<Auth> auth);
+    /// Create an RPC channel
+    Channel(std::unique_ptr<Auth> auth);
 
-    ~Client();
+    ~Channel();
 
     /// Make a remote procedure call
     virtual void call(
-	uint32_t proc,
+	uint32_t prog, uint32_t vers, uint32_t proc,
 	std::function<void(XdrSink*)> xargs,
 	std::function<void(XdrSource*)> xresults,
 	std::chrono::system_clock::duration timeout = std::chrono::seconds(30));
@@ -211,8 +211,6 @@ protected:
 	std::unique_ptr<XdrSource> body;
     };
 
-    uint32_t prog_;
-    uint32_t vers_;
     uint32_t xid_;
     std::chrono::system_clock::duration retransmitInterval_;
     std::unique_ptr<Auth> auth_;
@@ -225,15 +223,14 @@ protected:
 };
 
 /// Process RPC calls using the given registry of local services. Thread safe.
-class LocalClient: public Client
+class LocalChannel: public Channel
 {
 public:
-    LocalClient(
+    LocalChannel(
 	std::shared_ptr<ServiceRegistry> svcreg,
-	uint32_t prog, uint32_t vers,
 	std::unique_ptr<Auth> auth = nullptr);
 
-    // Client overrides
+    // Channel overrides
     std::unique_ptr<XdrSink> beginCall() override;
     void endCall(std::unique_ptr<XdrSink>&& msg) override;
     std::unique_ptr<XdrSource> beginReply(
@@ -248,11 +245,11 @@ private:
 };
 
 /// Send RPC messages over a socket
-class SocketClient: public Client
+class SocketChannel: public Channel
 {
 public:
-    SocketClient(
-	int sock, uint prog, uint vers, std::unique_ptr<Auth> auth = nullptr);
+    SocketChannel(
+	int sock, std::unique_ptr<Auth> auth = nullptr);
 
     /// Wait for the socket to become readable with the given
     /// timeout. Return true if the socket is readable or false if the
@@ -265,7 +262,7 @@ public:
     /// Return true if the socket is writable
     bool isWritable() const;
 
-    // Client overrides
+    // Channel overrides
     void close() override;
 
 protected:
@@ -274,13 +271,13 @@ protected:
 
 /// Send RPC messages over a connectionless datagram socket. Thread
 /// safe.
-class DatagramClient: public SocketClient
+class DatagramChannel: public SocketChannel
 {
 public:
-    DatagramClient(
-	int sock, uint prog, uint vers, std::unique_ptr<Auth> auth = nullptr);
+    DatagramChannel(
+	int sock, std::unique_ptr<Auth> auth = nullptr);
 
-    // Client overrides
+    // Channel overrides
     std::unique_ptr<XdrSink> beginCall() override;
     void endCall(std::unique_ptr<XdrSink>&& msg) override;
     std::unique_ptr<XdrSource> beginReply(
@@ -293,15 +290,15 @@ private:
 };
 
 /// Send RPC messages over a connected stream socket. Thread safe.
-class StreamClient: public SocketClient
+class StreamChannel: public SocketChannel
 {
 public:
-    StreamClient(
-	int sock, uint prog, uint vers, std::unique_ptr<Auth> auth = nullptr);
+    StreamChannel(
+	int sock, std::unique_ptr<Auth> auth = nullptr);
 
-    ~StreamClient();
+    ~StreamChannel();
 
-    // Client overrides
+    // Channel overrides
     std::unique_ptr<XdrSink> beginCall() override;
     void endCall(std::unique_ptr<XdrSink>&& msg) override;
     std::unique_ptr<XdrSource> beginReply(

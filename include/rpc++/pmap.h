@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include <rpc++/client.h>
+#include <rpc++/channel.h>
 #include <rpc++/xdr.h>
 
 namespace oncrpc {
@@ -10,8 +10,11 @@ namespace oncrpc {
 constexpr unsigned PMAPPROG = 100000;
 constexpr unsigned PMAPVERS = 2;
 constexpr unsigned PMAPPROC_NULL = 0;
+constexpr unsigned PMAPPROC_SET = 1;
+constexpr unsigned PMAPPROC_UNSET = 2;
 constexpr unsigned PMAPPROC_GETPORT = 3;
 constexpr unsigned PMAPPROC_DUMP = 4;
+constexpr unsigned PMAPPROC_CALLIT = 4;
 
 struct mapping
 {
@@ -73,23 +76,24 @@ void xdr(RefType<call_result, XDR> v, XDR* xdrs)
     xdr(v.res, xdrs);
 }
 
-class PmapClient
+class Portmap
 {
 public:
-    PmapClient(std::shared_ptr<Client> client)
-	: client_(client)
+    Portmap(std::shared_ptr<Channel> channel)
+	: channel_(channel)
     {
     }
 
     void null()
     {
-	client_->call(0, [](XdrSink*) {}, [](XdrSource*) {});
+	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_NULL,
+		       [](XdrSink*) {}, [](XdrSource*) {});
     }
 
     bool set(const mapping& args)
     {
 	bool res;
-	client_->call(1,
+	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_SET,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return res;
@@ -98,7 +102,7 @@ public:
     bool unset(const mapping& args)
     {
 	bool res;
-	client_->call(2,
+	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_UNSET,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return res;
@@ -107,7 +111,7 @@ public:
     uint32_t getport(const mapping& args)
     {
 	uint32_t res;
-	client_->call(3,
+	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_GETPORT,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return res;
@@ -116,7 +120,7 @@ public:
     std::unique_ptr<pmaplist> dump()
     {
 	std::unique_ptr<pmaplist> res;
-	client_->call(4,
+	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_DUMP,
 		      [&](XdrSink* xdrs) { },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return std::move(res);
@@ -125,14 +129,14 @@ public:
     call_result callit(call_args args)
     {
 	call_result res;
-	client_->call(5,
+	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_CALLIT,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return std::move(res);
     }
 
 private:
-    std::shared_ptr<Client> client_;
+    std::shared_ptr<Channel> channel_;
 };
 
 }

@@ -154,10 +154,7 @@ public:
     {
 	str_ << "constexpr int " << def->name()
 	     << " = " << def->prog() << ";" << endl;
-	for (const auto& ver: *def) {
-	    str_ << "constexpr int " << ver->name()
-		 << " = " << ver->vers() << ";" << endl;
-	}
+	str_ << endl;
 
 	string baseClassName = def->name();
 	transform(baseClassName.begin(),
@@ -168,13 +165,22 @@ public:
 		  });
 
 	for (const auto& ver: *def) {
+	    str_ << "constexpr int " << ver->name()
+		 << " = " << ver->vers() << ";" << endl;
+	    str_ << endl;
+	    for (const auto& proc: *ver) {
+		str_ << "constexpr int " << proc->name()
+		     << " = " << proc->proc() << ";" << endl;
+	    }
+	    str_ << endl;
+
 	    string className = baseClassName + "_" + to_string(ver->vers());
 	    str_ << "class " << className << " {" << endl;
 	    Indent indent(1);
 	    str_ << indent << className
-		 << "(std::shared_ptr<oncrpc::Client> client)" << endl;
+		 << "(std::shared_ptr<oncrpc::Channel> channel)" << endl;
 	    ++indent;
-	    str_ << indent << ": client_(client)" << endl;
+	    str_ << indent << ": channel_(channel)" << endl;
 	    --indent;
 	    str_ << indent << "{}" << endl;
 	    str_ << "public:" << endl;
@@ -195,9 +201,12 @@ public:
 		++indent;
 		if (proc->retType() != Parser::voidType())
 		    str_ << indent << *proc->retType() << " _ret;" << endl;
-		str_ << indent << "client_->call(" << endl;
+		str_ << indent << "channel_->call(" << endl;
 		++indent;
-		str_ << indent << proc->proc() << "," << endl;
+		str_ << indent
+		     << def->name() << ", "
+		     << ver->name() << ", "
+		     << proc->name() << "," << endl;
 		str_ << indent << "[&](oncrpc::XdrSink* xdrs) {" << endl;
 		++indent;
 		i = 0;
@@ -223,10 +232,10 @@ public:
 	    }
 	    str_ << "private:" << endl;
 	    str_ << indent
-		 << "std::shared_ptr<oncrpc::Client> client_;" << endl;
+		 << "std::shared_ptr<oncrpc::Channel> channel_;" << endl;
 	    str_ << "};" << endl;
+	    str_ << endl;
 	}
-	str_ << endl;
     }
 };
 

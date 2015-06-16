@@ -7,7 +7,7 @@
 
 #include <glog/logging.h>
 
-#include <rpc++/client.h>
+#include <rpc++/channel.h>
 #include <rpc++/rec.h>
 #include <rpc++/server.h>
 #include <rpc++/xdr.h>
@@ -172,29 +172,23 @@ AuthSys::validate(const opaque_auth& verf)
     return true;
 }
 
-std::chrono::seconds Client::maxBackoff(30);
+std::chrono::seconds Channel::maxBackoff(30);
 
-Client::Client(uint32_t prog, uint32_t vers,
-	       std::unique_ptr<Auth> auth)
-    : prog_(prog),
-      vers_(vers),
-      xid_(nextXid())
+Channel::Channel(std::unique_ptr<Auth> auth)
+    : xid_(nextXid()),
+      auth_(auth ? std::move(auth) : std::make_unique<AuthNone>())
 {
     retransmitInterval_ = std::chrono::seconds(1);
-    if (auth.get())
-	auth_ = std::move(auth);
-    else
-	auth_ = std::make_unique<AuthNone>();
 }
 
-Client::~Client()
+Channel::~Channel()
 {
     assert(pending_.size() == 0);
 }
 
 void
-Client::call(
-    uint32_t proc,
+Channel::call(
+    uint32_t prog, uint32_t vers, uint32_t proc,
     std::function<void(XdrSink*)> xargs,
     std::function<void(XdrSource*)> xresults,
     std::chrono::system_clock::duration timeout)
@@ -204,8 +198,8 @@ Client::call(
 
 call_again:
     call_body cbody;
-    cbody.prog = prog_;
-    cbody.vers = vers_;
+    cbody.prog = prog;
+    cbody.vers = vers;
     cbody.proc = proc;
     auth_->encode(cbody.cred, cbody.verf);
 
@@ -376,7 +370,7 @@ call_again:
 		    assert(false);
 
 		case PROG_UNAVAIL:
-		    throw ProgramUnavailable(prog_);
+		    throw ProgramUnavailable(prog);
 				
 		case PROG_MISMATCH:
 		    throw VersionMismatch(
@@ -424,23 +418,23 @@ call_again:
     }
 }
 
-LocalClient::LocalClient(
+LocalChannel::LocalChannel(
     std::shared_ptr<ServiceRegistry> svcreg,
-    uint32_t prog, uint32_t vers, std::unique_ptr<Auth> auth)
-    : Client(prog, vers, std::move(auth)),
+    std::unique_ptr<Auth> auth)
+    : Channel(std::move(auth)),
       bufferSize_(1500),	// XXX size
       svcreg_(svcreg)
 {
 }
 
 std::unique_ptr<XdrSink>
-LocalClient::beginCall()
+LocalChannel::beginCall()
 {
     return std::make_unique<XdrMemory>(bufferSize_);
 }
 
 void
-LocalClient::endCall(std::unique_ptr<XdrSink>&& tmsg)
+LocalChannel::endCall(std::unique_ptr<XdrSink>&& tmsg)
 {
     std::unique_ptr<XdrMemory> msg(static_cast<XdrMemory*>(tmsg.release()));
     msg->rewind();
@@ -449,7 +443,7 @@ LocalClient::endCall(std::unique_ptr<XdrSink>&& tmsg)
 }
 
 std::unique_ptr<XdrSource>
-LocalClient::beginReply(std::chrono::system_clock::duration timeout)
+LocalChannel::beginReply(std::chrono::system_clock::duration timeout)
 {
     std::unique_ptr<XdrMemory> msg;
     {
@@ -465,26 +459,25 @@ LocalClient::beginReply(std::chrono::system_clock::duration timeout)
 }
 
 void
-LocalClient::endReply(std::unique_ptr<XdrSource>&& msg, bool skip)
+LocalChannel::endReply(std::unique_ptr<XdrSource>&& msg, bool skip)
 {
     std::unique_ptr<XdrMemory> p(static_cast<XdrMemory*>(msg.release()));
     p.reset();
 }
 
 void
-LocalClient::close()
+LocalChannel::close()
 {
 }
 
-SocketClient::SocketClient(
-    int sock, uint prog, uint vers, std::unique_ptr<Auth> auth)
-    : Client(prog, vers, std::move(auth)),
+SocketChannel::SocketChannel(int sock, std::unique_ptr<Auth> auth)
+    : Channel(std::move(auth)),
       sock_(sock)
 {
 }
 
 bool
-SocketClient::waitForReadable(std::chrono::system_clock::duration timeout)
+SocketChannel::waitForReadable(std::chrono::system_clock::duration timeout)
 {
     fd_set rset;
     FD_ZERO(&rset);
@@ -503,7 +496,7 @@ SocketClient::waitForReadable(std::chrono::system_clock::duration timeout)
 }
 
 bool
-SocketClient::isReadable() const
+SocketChannel::isReadable() const
 {
     fd_set rset;
     struct timeval tv { 0, 0 };
@@ -514,9 +507,8 @@ SocketClient::isReadable() const
     return nready == 1;
 }
 
-
 bool
-SocketClient::isWritable() const
+SocketChannel::isWritable() const
 {
     fd_set wset;
     struct timeval tv { 0, 0 };
@@ -528,21 +520,21 @@ SocketClient::isWritable() const
 }
 
 void
-SocketClient::close()
+SocketChannel::close()
 {
     ::close(sock_);
 }
 
-DatagramClient::DatagramClient(
-    int sock, uint prog, uint vers, std::unique_ptr<Auth> auth)
-    : SocketClient(sock, prog, vers, std::move(auth)),
+DatagramChannel::DatagramChannel(
+    int sock, std::unique_ptr<Auth> auth)
+    : SocketChannel(sock, std::move(auth)),
       bufferSize_(1500),
       xdrs_(std::make_unique<XdrMemory>(bufferSize_))
 {
 }
 
 std::unique_ptr<XdrSink>
-DatagramClient::beginCall()
+DatagramChannel::beginCall()
 {
     std::unique_lock<std::mutex> lock(mutex_);
     if (xdrs_) {
@@ -556,7 +548,7 @@ DatagramClient::beginCall()
 }
 
 void
-DatagramClient::endCall(std::unique_ptr<XdrSink>&& msg)
+DatagramChannel::endCall(std::unique_ptr<XdrSink>&& msg)
 {
     std::unique_ptr<XdrMemory> t(static_cast<XdrMemory*>(msg.release()));
     ::write(sock_, t->buf(), t->pos());
@@ -565,7 +557,7 @@ DatagramClient::endCall(std::unique_ptr<XdrSink>&& msg)
 }
 
 std::unique_ptr<XdrSource>
-DatagramClient::beginReply(std::chrono::system_clock::duration timeout)
+DatagramChannel::beginReply(std::chrono::system_clock::duration timeout)
 {
     if (!waitForReadable(timeout))
 	return nullptr;
@@ -589,15 +581,15 @@ DatagramClient::beginReply(std::chrono::system_clock::duration timeout)
 }
 
 void
-DatagramClient::endReply(std::unique_ptr<XdrSource>&& msg, bool skip)
+DatagramChannel::endReply(std::unique_ptr<XdrSource>&& msg, bool skip)
 {
     std::unique_lock<std::mutex> lock(mutex_);
     xdrs_.reset(static_cast<XdrMemory*>(msg.release()));
 }
 
-StreamClient::StreamClient(
-    int sock, uint prog, uint vers, std::unique_ptr<Auth> auth)
-    : SocketClient(sock, prog, vers, std::move(auth)),
+StreamChannel::StreamChannel(
+    int sock, std::unique_ptr<Auth> auth)
+    : SocketChannel(sock, std::move(auth)),
       bufferSize_(1500),
       sender_(
 	  std::make_unique<RecordWriter>(
@@ -609,12 +601,12 @@ StreamClient::StreamClient(
 {
 }
 
-StreamClient::~StreamClient()
+StreamChannel::~StreamChannel()
 {
 }
 
 std::unique_ptr<XdrSink>
-StreamClient::beginCall()
+StreamChannel::beginCall()
 {
     std::unique_lock<std::mutex> lock(writeMutex_);
     std::unique_ptr<XdrMemory> msg = std::move(sendbuf_);
@@ -625,7 +617,7 @@ StreamClient::beginCall()
 }
 
 void
-StreamClient::endCall(std::unique_ptr<XdrSink>&& tmsg)
+StreamChannel::endCall(std::unique_ptr<XdrSink>&& tmsg)
 {
     std::unique_lock<std::mutex> lock(writeMutex_);
     std::unique_ptr<XdrMemory> msg;
@@ -652,7 +644,7 @@ readAll(int sock, void* buf, size_t len)
 }
 
 std::unique_ptr<XdrSource>
-StreamClient::beginReply(std::chrono::system_clock::duration timeout)
+StreamChannel::beginReply(std::chrono::system_clock::duration timeout)
 {
     VLOG(2) << "waiting for reply";
     if (!waitForReadable(timeout))
@@ -691,14 +683,14 @@ StreamClient::beginReply(std::chrono::system_clock::duration timeout)
 }
 
 void
-StreamClient::endReply(std::unique_ptr<XdrSource>&& tmsg, bool skip)
+StreamChannel::endReply(std::unique_ptr<XdrSource>&& tmsg, bool skip)
 {
     std::unique_ptr<XdrMemory> msg;
     msg.reset(static_cast<XdrMemory*>(tmsg.release()));
 }
 
 ptrdiff_t
-StreamClient::write(const void* buf, size_t len)
+StreamChannel::write(const void* buf, size_t len)
 {
     // This will always be called via endCall with writeMutex_ held.
     auto p = reinterpret_cast<const uint8_t*>(buf);

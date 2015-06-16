@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include <rpc++/client.h>
+#include <rpc++/channel.h>
 #include <rpc++/util.h>
 #include <rpc++/xdr.h>
 
@@ -245,23 +245,23 @@ constexpr int RPCBPROG = 100000;
 constexpr int RPCBVERS = 3;
 constexpr int RPCBVERS4 = 4;
 
-class RpcBindClient
+class RpcBind
 {
 public:
-    RpcBindClient(std::shared_ptr<Client> client)
-	: client_(client)
+    RpcBind(std::shared_ptr<Channel> channel)
+	: channel_(channel)
     {
     }
 
     void null()
     {
-	client_->call(0, [](XdrSink*) {}, [](XdrSource*) {});
+	channel_->call(RPCBPROG, RPCBVERS, 0, [](XdrSink*) {}, [](XdrSource*) {});
     }
 
     bool set(const rpcb& args)
     {
 	bool res;
-	client_->call(1,
+	channel_->call(RPCBPROG, RPCBVERS, 1,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return res;
@@ -270,7 +270,7 @@ public:
     bool unset(const rpcb& args)
     {
 	bool res;
-	client_->call(2,
+	channel_->call(RPCBPROG, RPCBVERS, 2,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return res;
@@ -279,7 +279,7 @@ public:
     std::string getaddr(const rpcb& args)
     {
 	std::string res;
-	client_->call(3,
+	channel_->call(RPCBPROG, RPCBVERS, 3,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return res;
@@ -288,7 +288,7 @@ public:
     rpcblist_ptr dump()
     {
 	rpcblist_ptr res;
-	client_->call(4,
+	channel_->call(RPCBPROG, RPCBVERS, 4,
 		      [&](XdrSink* xdrs) { },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return std::move(res);
@@ -297,7 +297,7 @@ public:
     rpcb_rmtcallres callit(const rpcb_rmtcallargs& args)
     {
 	rpcb_rmtcallres res;
-	client_->call(5,
+	channel_->call(RPCBPROG, RPCBVERS, 5,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return std::move(res);
@@ -306,7 +306,7 @@ public:
     uint32_t gettime()
     {
 	uint32_t res;
-	client_->call(6,
+	channel_->call(RPCBPROG, RPCBVERS, 6,
 		      [&](XdrSink* xdrs) { },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return res;
@@ -315,7 +315,7 @@ public:
     netbuf uaddr2taddr(const std::string& args)
     {
 	netbuf res;
-	client_->call(7,
+	channel_->call(RPCBPROG, RPCBVERS, 7,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return std::move(res);
@@ -324,14 +324,14 @@ public:
     std::string taddr2uaddr(const netbuf& args)
     {
 	std::string res;
-	client_->call(7,
+	channel_->call(RPCBPROG, RPCBVERS, 7,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return std::move(res);
     }
 
 private:
-    std::shared_ptr<Client> client_;
+    std::shared_ptr<Channel> channel_;
 };
 
 #if 0

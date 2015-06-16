@@ -9,7 +9,7 @@
 #include <system_error>
 #include <vector>
 
-#include <rpc++/client.h>
+#include <rpc++/channel.h>
 #include <rpc++/pmap.h>
 #include <rpc++/rpcbind.h>
 
@@ -136,9 +136,8 @@ string lookupProgram(unsigned prog)
     return "???";
 }
 
-std::shared_ptr<Client> connectClient(
-    const std::string& host, const options& opts,
-    uint32_t prog, uint32_t vers)
+std::shared_ptr<Channel> connectChannel(
+    const std::string& host, const options& opts)
 {
     string service = std::to_string(opts.port);
 
@@ -153,13 +152,12 @@ std::shared_ptr<Client> connectClient(
     }
 
     if (socktype == SOCK_STREAM)
-	return std::make_shared<StreamClient>(sock, prog, vers);
+	return std::make_shared<StreamChannel>(sock);
     else
-	return std::make_shared<DatagramClient>(sock, prog, vers);
+	return std::make_shared<DatagramChannel>(sock);
 }
 
-std::shared_ptr<Client> connectClient(
-    const AddressInfo* addr, uint32_t prog, uint32_t vers)
+std::shared_ptr<Channel> connectChannel(const AddressInfo* addr)
 {
     string cause = "";
     std::error_code ec;
@@ -185,9 +183,9 @@ std::shared_ptr<Client> connectClient(
     }
 
     if (addr->socktype == SOCK_STREAM)
-	return std::make_shared<StreamClient>(s, prog, vers);
+	return std::make_shared<StreamChannel>(s);
     else
-	return std::make_shared<DatagramClient>(s, prog, vers);
+	return std::make_shared<DatagramChannel>(s);
 }
 
 template <typename T>
@@ -211,7 +209,7 @@ void listServices(const vector<string>& args, const options& opts)
     else
 	host = "localhost";
 
-    RpcBindClient cl(connectClient(host, opts, RPCBPROG, RPCBVERS));
+    RpcBind chan(connectChannel(host, opts));
 
     if (opts.shortFormat) {
 	struct programInfo
@@ -222,7 +220,7 @@ void listServices(const vector<string>& args, const options& opts)
 	};
 	map<uint32_t, programInfo> programs;
 
-	auto p0 = cl.dump();
+	auto p0 = chan.dump();
 	for (auto p = p0.get(); p; p = p->rpcb_next.get()) {
 	    const auto& map = p->rpcb_map;
 	    auto& prog = programs[map.r_prog];
@@ -245,7 +243,7 @@ void listServices(const vector<string>& args, const options& opts)
 	TableFormatter<10, 10, 10, 24, 12, 12> tf(cout);
 	tf("program", "version", "netid", "address", "service", "owner");
 
-	auto p0 = cl.dump();
+	auto p0 = chan.dump();
 	for (auto p = p0.get(); p; p = p->rpcb_next.get()) {
 	    const auto& map = p->rpcb_map;
 	    tf(map.r_prog, map.r_vers, map.r_netid, map.r_addr,
@@ -265,12 +263,12 @@ void listServicesV2(const vector<string>& args, const options& opts)
     else
 	host = "localhost";
 
-    PmapClient cl(connectClient(host, opts, PMAPPROG, PMAPVERS));
+    Portmap pmap(connectChannel(host, opts));
 
     TableFormatter<10, 6, 7, 7, 9> tf(cout);
     tf("program", "vers", "proto", "port", "service");
 
-    auto p0 = cl.dump();
+    auto p0 = pmap.dump();
     for (auto p = p0.get(); p; p = p->next.get()) {
 	auto& map = p->map;
 	string prot;
@@ -301,7 +299,7 @@ void ping(const vector<string>& args, const options& opts)
     uint32_t program = stoi(args[1]);
 
     // Connect to rpcbind on the remote host
-    RpcBindClient rpcbind(connectClient(host, opts, RPCBPROG, RPCBVERS));
+    RpcBind rpcbind(connectChannel(host, opts));
 
     rpcb rb{ program, 0 };
     auto uaddr = rpcbind.getaddr(rb);
@@ -317,9 +315,9 @@ void ping(const vector<string>& args, const options& opts)
 	versions.push_back(stoi(args[2]));
     else {
 	// Use a null call on version 0 to get the version range
-	auto cl = connectClient(addr.get(), program, 0);
+	auto chan = connectChannel(addr.get());
 	try {
-	    cl->call(0, [](XdrSink*){}, [](XdrSource*){});
+	    chan->call(program, 0, 0, [](XdrSink*){}, [](XdrSource*){});
 	}
 	catch (VersionMismatch& e) {
 	    for (auto i = e.minver(); i != e.maxver(); i++)
@@ -332,9 +330,9 @@ void ping(const vector<string>& args, const options& opts)
     }
 
     for (auto version: versions) {
-	auto cl = connectClient(addr.get(), program, version);
+	auto chan = connectChannel(addr.get());
 	try {
-	    cl->call(0, [](XdrSink*){}, [](XdrSource*){});
+	    chan->call(program, version, 0, [](XdrSink*){}, [](XdrSource*){});
 	}
 	catch (RpcError& e) {
 	    cout << "rpcinfo: " << e.what() << endl;

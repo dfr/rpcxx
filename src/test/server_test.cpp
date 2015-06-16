@@ -2,7 +2,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
-#include <rpc++/client.h>
+#include <rpc++/channel.h>
 #include <rpc++/rpcproto.h>
 #include <rpc++/server.h>
 #include <rpc++/xdr.h>
@@ -155,22 +155,22 @@ TEST_F(ServerTest, Stream)
     int sockpair[2];
     ASSERT_GE(::socketpair(AF_LOCAL, SOCK_STREAM, 0, sockpair), 0);
 
-    auto cl = make_shared<StreamClient>(sockpair[0], 1234, 1);
+    auto chan = make_shared<StreamChannel>(sockpair[0]);
 
     auto connreg = make_shared<ConnectionRegistry>();
     connreg->add(make_shared<StreamConnection>(sockpair[1], 32768, svcreg));
     thread server([connreg]() { connreg->run(); });
 
     // Send a message and check the reply
-    cl->call(
-	1,
+    chan->call(
+	1234, 1, 1,
 	[](XdrSink* xdrs) { uint32_t v = 123; xdr(v, xdrs); },
 	[](XdrSource* xdrs) { uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
 
     // Close this side of the socket pair which should prompt the
     // connection registry to stop when it notices the end-of-file
-    cl->close();
-    cl = nullptr;
+    chan->close();
+    chan.reset();
     server.join();
 }
 
@@ -197,9 +197,9 @@ TEST_F(ServerTest, Listen)
 		  sock, reinterpret_cast<sockaddr*>(&sun), sizeof(sun)), 0);
     
     // Send a message and check the reply
-    auto cl = make_shared<StreamClient>(sock, 1234, 1);
-    cl->call(
-	1,
+    auto chan = make_shared<StreamChannel>(sock);
+    chan->call(
+	1234, 1, 1,
 	[](XdrSink* xdrs) { uint32_t v = 123; xdr(v, xdrs); },
 	[](XdrSource* xdrs) { uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
 
@@ -207,8 +207,8 @@ TEST_F(ServerTest, Listen)
     // won't stop running automatically since the listen socket is
     // still valid so we tell it to stop.
     connreg->stop();
-    cl->close();
-    cl = nullptr;
+    chan->close();
+    chan.reset();
     server.join();
 
     EXPECT_GE(::unlink(sun.sun_path), 0);
