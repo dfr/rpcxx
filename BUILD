@@ -1,5 +1,5 @@
 cc_library(
-    name = "rpc",
+    name = "rpcxx",
     copts = ["-std=c++14"],
     srcs = glob([
             "src/*.cpp",
@@ -15,7 +15,7 @@ cc_test(
     copts = ["-std=c++14"],
     srcs = glob(["src/test/*.cpp"]),
     deps = [
-        ":rpc",
+        ":rpcxx",
         "//third_party/glog:glog",
         "//third_party/gtest:gtest_main"]
 )
