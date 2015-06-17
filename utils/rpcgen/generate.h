@@ -142,6 +142,31 @@ public:
     }
 };
 
+/// Return the length of the longest common prefix
+static int
+longestCommonPrefix(const vector<string>& methods)
+{
+    if (methods.size() == 0)
+	return 0;
+
+    string prefix = methods[0];
+    for (auto i = methods.begin() + 1; i != methods.end(); ++i) {
+	const string& s = *i;
+	while (prefix.size() > 0 && s.find(prefix) != 0) {
+	    prefix = prefix.substr(0, prefix.size() - 1);
+	}
+    }
+    return prefix.size();
+}
+
+static void
+lcase(string& s)
+{
+    transform(s.begin(), s.end(), s.begin(),
+	      [](char ch) {return std::tolower(ch);});
+
+}
+
 class GenerateClient: public GenerateBase
 {
 public:
@@ -157,22 +182,20 @@ public:
 	str_ << endl;
 
 	string baseClassName = def->name();
-	transform(baseClassName.begin(),
-		  baseClassName.end(),
-		  baseClassName.begin(),
-		  [](char ch) {
-		      return std::tolower(ch);
-		  });
+	lcase(baseClassName);
 
 	for (const auto& ver: *def) {
 	    str_ << "constexpr int " << ver->name()
 		 << " = " << ver->vers() << ";" << endl;
 	    str_ << endl;
+	    vector<string> methods;
 	    for (const auto& proc: *ver) {
+		methods.push_back(proc->name());
 		str_ << "constexpr int " << proc->name()
 		     << " = " << proc->proc() << ";" << endl;
 	    }
 	    str_ << endl;
+	    int prefixlen = longestCommonPrefix(methods);
 
 	    string className = baseClassName + "_" + to_string(ver->vers());
 	    str_ << "class " << className << " {" << endl;
@@ -185,7 +208,9 @@ public:
 	    str_ << indent << "{}" << endl;
 	    str_ << "public:" << endl;
 	    for (const auto& proc: *ver) {
-		str_ << indent << *proc->retType() << " " << proc->name();
+		string methodName = proc->name().substr(prefixlen);
+		lcase(methodName);
+		str_ << indent << *proc->retType() << " " << methodName;
 		str_ << "(";
 		string sep = "";
 		int i = 0;
