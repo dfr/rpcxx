@@ -80,20 +80,21 @@ class Portmap
 {
 public:
     Portmap(std::shared_ptr<Channel> channel)
-	: channel_(channel)
+	: channel_(channel),
+	  client_(std::make_shared<Client>(PMAPPROG, PMAPVERS))
     {
     }
 
     void null()
     {
-	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_NULL,
+	channel_->call(client_.get(), PMAPPROC_NULL,
 		       [](XdrSink*) {}, [](XdrSource*) {});
     }
 
     bool set(const mapping& args)
     {
 	bool res;
-	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_SET,
+	channel_->call(client_.get(), PMAPPROC_SET,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return res;
@@ -102,7 +103,7 @@ public:
     bool unset(const mapping& args)
     {
 	bool res;
-	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_UNSET,
+	channel_->call(client_.get(), PMAPPROC_UNSET,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return res;
@@ -111,7 +112,7 @@ public:
     uint32_t getport(const mapping& args)
     {
 	uint32_t res;
-	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_GETPORT,
+	channel_->call(client_.get(), PMAPPROC_GETPORT,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return res;
@@ -120,7 +121,7 @@ public:
     std::unique_ptr<pmaplist> dump()
     {
 	std::unique_ptr<pmaplist> res;
-	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_DUMP,
+	channel_->call(client_.get(), PMAPPROC_DUMP,
 		      [&](XdrSink* xdrs) { },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return std::move(res);
@@ -129,7 +130,7 @@ public:
     call_result callit(call_args args)
     {
 	call_result res;
-	channel_->call(PMAPPROG, PMAPVERS, PMAPPROC_CALLIT,
+	channel_->call(client_.get(), PMAPPROC_CALLIT,
 		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
 		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
 	return std::move(res);
@@ -137,6 +138,7 @@ public:
 
 private:
     std::shared_ptr<Channel> channel_;
+    std::shared_ptr<Client> client_;
 };
 
 }

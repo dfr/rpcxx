@@ -2,9 +2,9 @@
 #include <sys/un.h>
 
 #include <rpc++/channel.h>
+#include <rpc++/client.h>
 #include <rpc++/server.h>
 #include <gtest/gtest.h>
-
 
 using namespace oncrpc;
 using namespace std;
@@ -14,26 +14,35 @@ namespace {
 class ChannelTest: public ::testing::Test
 {
 public:
+    ChannelTest()
+	: client(make_shared<Client>(1234, 1))
+    {
+    }
+
     /// Call a simple echo service with the given procedure number
-    void simpleCall(shared_ptr<Channel> chan, uint32_t vers, uint32_t proc)
+    void simpleCall(
+	shared_ptr<Channel> chan, shared_ptr<Client> client, uint32_t proc)
     {
 	chan->call(
-	    1234, vers, proc,
+	    client.get(), proc,
 	    [](XdrSink* xdrs) {
 		uint32_t v = 123; xdr(v, xdrs); },
 	    [](XdrSource* xdrs) {
 		uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
     }
 
-    thread callMany(shared_ptr<Channel> chan, uint32_t proc, int iterations)
+    thread callMany(
+	shared_ptr<Channel> chan, uint32_t proc, int iterations)
     {
 	return thread(
 	    [=]() {
 		for (int i = 0; i < iterations; i++) {
-		    simpleCall(chan, 1, 1);
+		    simpleCall(chan, client, 1);
 		}
 	    });
     }
+
+    shared_ptr<Client> client;
 };
 
 class SimpleServer
@@ -57,9 +66,10 @@ public:
 		    auto dec = beginCall();
 		    rpc_msg call_msg;
 		    uint32_t val;
+
 		    xdr(call_msg, dec);
-		    auto proc = call_msg.cbody().proc;
-		    if (proc == 1)
+		    auto cbody = call_msg.cbody();
+		    if (cbody.proc == 1)
 			xdr(val, dec);
 		    endCall();
 
@@ -70,11 +80,11 @@ public:
 
 		    auto enc = beginReply();
 		    xdr(reply_msg, enc);
-		    if (proc == 1)
+		    if (cbody.proc == 1)
 			xdr(val, enc);
 		    endReply();
 
-		    if (proc == 2)
+		    if (cbody.proc == 2)
 			stopping = true;
 		}
 	    });
@@ -85,9 +95,10 @@ public:
 	thread_.join();
     }
 
-    void stop(shared_ptr<Channel> chan)
+    void stop(shared_ptr<Channel> chan, shared_ptr<Client> client)
     { 
-	chan->call(1234, 1, 2, [](XdrSink* xdrs) {}, [](XdrSource* xdrs) {});
+	chan->call(
+	    client.get(), 2, [](XdrSink* xdrs) {}, [](XdrSource* xdrs) {});
     }
 
     virtual XdrSource* beginCall() = 0;
@@ -210,11 +221,6 @@ public:
 class TimeoutChannel: public Channel
 {
 public:
-    TimeoutChannel()
-	: Channel(nullptr)
-    {
-    }
-
     unique_ptr<XdrSink> beginCall() override
     {
 	return unique_ptr<XdrSink>(new XdrMemory(buf_, sizeof(buf_)));
@@ -248,7 +254,7 @@ TEST_F(ChannelTest, Basic)
 
     // XXX need an exception type for timeout
     EXPECT_THROW(
-	channel.call(1234, 1, 1,
+	channel.call(client.get(), 1,
 		     [](XdrSink* xdrs) {},
 		     [](XdrSource* xdrs) {},
 		     chrono::milliseconds(1)),
@@ -261,7 +267,7 @@ TEST_F(ChannelTest, LocalChannel)
     auto channel = make_shared<LocalChannel>(svcreg);
 
     // We have no services so any call should return PROG_UNAVAIL
-    EXPECT_THROW(simpleCall(channel, 1, 1), ProgramUnavailable);
+    EXPECT_THROW(simpleCall(channel, client, 1), ProgramUnavailable);
 
     // Add a service handler for program 1234, version 2
     auto handler = [](uint32_t proc, XdrSource* xdrin, XdrSink* xdrout)
@@ -282,17 +288,20 @@ TEST_F(ChannelTest, LocalChannel)
 
     // Try calling with the wrong version number and check for
     // PROG_MISMATCH
-    EXPECT_THROW(simpleCall(channel, 1, 1), VersionMismatch);
+    EXPECT_THROW(simpleCall(channel, client, 1), VersionMismatch);
+
+    // Change the client to specify verision 2
+    client = make_shared<Client>(1234, 2);
 
     // Check PROC_UNAVAIL
-    EXPECT_THROW(simpleCall(channel, 2, 2), ProcedureUnavailable);
+    EXPECT_THROW(simpleCall(channel, client, 2), ProcedureUnavailable);
 
     // Call again with the right version number and procedure
-    simpleCall(channel, 2, 1);
+    simpleCall(channel, client, 1);
 
     // Unregister our handler and verify that we get PROG_UNAVAIL again
     svcreg->remove(1234, 2);
-    EXPECT_THROW(simpleCall(channel, 2, 1), ProgramUnavailable);
+    EXPECT_THROW(simpleCall(channel, client, 1), ProgramUnavailable);
 }
 
 TEST_F(ChannelTest, LocalManyThreads)
@@ -359,9 +368,9 @@ TEST_F(ChannelTest, DatagramChannel)
     
     // Send a message and check the reply
     auto chan = make_shared<DatagramChannel>(clsock);
-    simpleCall(chan, 1, 1);
+    simpleCall(chan, client, 1);
 
-    server.stop(chan);
+    server.stop(chan, client);
 
     ::unlink(saddr.sun_path);
     ::unlink(claddr.sun_path);
@@ -408,7 +417,7 @@ TEST_F(ChannelTest, DatagramManyThreads)
 	t.join();
 
     // Ask the server to stop running
-    server.stop(chan);
+    server.stop(chan, client);
 
     ASSERT_GE(::unlink(saddr.sun_path), 0);
     ASSERT_GE(::unlink(claddr.sun_path), 0);
@@ -426,10 +435,10 @@ TEST_F(ChannelTest, StreamChannel)
 
     // Send a message and check the reply
     auto chan = make_shared<StreamChannel>(clsock);
-    simpleCall(chan, 1, 1);
+    simpleCall(chan, client, 1);
 
     // Ask the server to stop running
-    server.stop(chan);
+    server.stop(chan, client);
 }
 
 TEST_F(ChannelTest, StreamManyThreads)
@@ -455,7 +464,7 @@ TEST_F(ChannelTest, StreamManyThreads)
 	t.join();
 
     // Ask the server to stop running
-    server.stop(chan);
+    server.stop(chan, client);
 }
 
 }

@@ -69,6 +69,9 @@ public:
 #endif
     }
 
+    const void* data() const { return &value_; }
+    void* data() { return &value_; }
+
 private:
     uint32_t value_;
 };

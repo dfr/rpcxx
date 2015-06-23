@@ -201,9 +201,15 @@ public:
 	    str_ << "class " << className << " {" << endl;
 	    Indent indent(1);
 	    str_ << indent << className
-		 << "(std::shared_ptr<oncrpc::Channel> channel)" << endl;
+		 << "(" << endl;
 	    ++indent;
-	    str_ << indent << ": channel_(channel)" << endl;
+	    str_ << indent
+		 << "std::shared_ptr<oncrpc::Channel> channel," << endl;
+	    str_ << indent
+		 << "std::unique_ptr<oncrpc::Auth> auth = nullptr)" << endl;
+	    str_ << indent << ": channel_(channel)," << endl;
+	    str_ << indent << "  state_(" << def->name()
+		 << ", " << ver->name() << ", auth)" << endl;
 	    --indent;
 	    str_ << indent << "{}" << endl;
 	    str_ << "public:" << endl;
@@ -228,9 +234,7 @@ public:
 		    str_ << indent << *proc->retType() << " _ret;" << endl;
 		str_ << indent << "channel_->call(" << endl;
 		++indent;
-		str_ << indent
-		     << def->name() << ", "
-		     << ver->name() << ", "
+		str_ << indent << "state_, "
 		     << proc->name() << "," << endl;
 		str_ << indent << "[&](oncrpc::XdrSink* xdrs) {" << endl;
 		++indent;
@@ -257,7 +261,9 @@ public:
 	    }
 	    str_ << "private:" << endl;
 	    str_ << indent
-		 << "std::shared_ptr<oncrpc::Channel> channel_;" << endl;
+		 << "std::shared_ptr<oncrpc::Channel> channel_;" << endl
+		 << indent
+		 << "CallState state_;" << endl;
 	    str_ << "};" << endl;
 	    str_ << endl;
 	}

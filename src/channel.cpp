@@ -7,7 +7,9 @@
 
 #include <glog/logging.h>
 
+#include <rpc++/auth.h>
 #include <rpc++/channel.h>
+#include <rpc++/client.h>
 #include <rpc++/rec.h>
 #include <rpc++/server.h>
 #include <rpc++/xdr.h>
@@ -109,74 +111,11 @@ AuthError::AuthError(auth_stat stat)
 {
 }
 
-bool
-Auth::refresh(auth_stat stat)
-{
-    return false;
-}
-
-void
-AuthNone::encode(opaque_auth& cred, opaque_auth& verf)
-{
-    cred.flavor = AUTH_NONE;
-    cred.auth_body.clear();
-    verf.flavor = AUTH_NONE;
-    verf.auth_body.clear();
-}
-
-bool
-AuthNone::validate(const opaque_auth& verf)
-{
-    return true;
-}
-
-AuthSys::AuthSys()
-{
-    char hostname[255];
-    gethostname(hostname, 254);
-    hostname[254] = '\0';
-
-    std::vector<gid_t> gids;
-    gids.resize(getgroups(0, nullptr));
-    getgroups(gids.size(), gids.data());
-
-    authsys_parms parms;
-    parms.stamp = 0;
-    parms.machinename = hostname;
-    parms.uid = getuid();
-    parms.gid = getgid();
-    parms.gids.resize(gids.size());
-    std::copy(gids.begin(), gids.end(), parms.gids.begin());
-
-    parms_.resize(512);
-    auto xdrs = std::make_unique<XdrMemory>(parms_.data(), 512);
-    xdr(parms, static_cast<XdrSink*>(xdrs.get()));
-    parms_.resize(xdrs->pos());
-}
-
-void
-AuthSys::encode(opaque_auth& cred, opaque_auth& verf)
-{
-    cred.flavor = AUTH_SYS;
-    cred.auth_body = parms_;
-    verf.flavor = AUTH_NONE;
-    verf.auth_body.clear();
-}
-
-bool
-AuthSys::validate(const opaque_auth& verf)
-{
-    // We could implement AUTH_SHORT here but there isn't much
-    // point since it won't really affect performance and many
-    // server implementations don't bother with it.
-    return true;
-}
 
 std::chrono::seconds Channel::maxBackoff(30);
 
-Channel::Channel(std::unique_ptr<Auth> auth)
-    : xid_(nextXid()),
-      auth_(auth ? std::move(auth) : std::make_unique<AuthNone>())
+Channel::Channel()
+    : xid_(nextXid())
 {
     retransmitInterval_ = std::chrono::seconds(1);
 }
@@ -188,7 +127,7 @@ Channel::~Channel()
 
 void
 Channel::call(
-    uint32_t prog, uint32_t vers, uint32_t proc,
+    Client* client, uint32_t proc,
     std::function<void(XdrSink*)> xargs,
     std::function<void(XdrSource*)> xresults,
     std::chrono::system_clock::duration timeout)
@@ -196,13 +135,9 @@ Channel::call(
     int nretries = 0;
     auto retransmitInterval = retransmitInterval_;
 
-call_again:
-    call_body cbody;
-    cbody.prog = prog;
-    cbody.vers = vers;
-    cbody.proc = proc;
-    auth_->encode(cbody.cred, cbody.verf);
+    client->validateAuth(this);
 
+call_again:
     std::unique_lock<std::mutex> lock(mutex_);
 
     auto xid = xid_++;
@@ -210,7 +145,6 @@ call_again:
 	    << " xid: " << xid << ": new call";
     auto i = pending_.emplace(xid, std::move(Transaction()));
     auto& tx = i.first->second;
-    rpc_msg call_msg(xid, std::move(cbody));
 
     auto now = std::chrono::system_clock::now();
     auto maxTime = now + timeout;
@@ -219,8 +153,7 @@ call_again:
 	// Drop the lock while we transmit
 	lock.unlock();
 	auto xdrout = beginCall();
-	xdr(call_msg, xdrout.get());
-	xargs(xdrout.get());
+	tx.seq = client->processCall(this, xid, proc, xdrout.get(), xargs);
 	endCall(std::move(xdrout));
 	lock.lock();
 
@@ -350,14 +283,10 @@ call_again:
 	if (reply_msg.mtype == REPLY
 	    && reply_msg.rbody().stat == MSG_ACCEPTED
 	    && reply_msg.rbody().areply().stat == SUCCESS) {
-	    if (!auth_->validate(reply_msg.rbody().areply().verf)) {
-		// XXX auth stuff
-		assert(false);
-	    } else {
-		xresults(xdrin.get());
-		endReply(std::move(xdrin), false);
-		return;
-	    }
+	    client->processReply(
+		tx.seq, reply_msg.rbody().areply(), xdrin.get(), xresults);
+	    endReply(std::move(xdrin), false);
+	    break;
 	}
 	else {
 	    endReply(std::move(xdrin), false);
@@ -370,7 +299,7 @@ call_again:
 		    assert(false);
 
 		case PROG_UNAVAIL:
-		    throw ProgramUnavailable(prog);
+		    throw ProgramUnavailable(client->program());
 				
 		case PROG_MISMATCH:
 		    throw VersionMismatch(
@@ -401,7 +330,7 @@ call_again:
 			rreply.rpc_mismatch.high);
 
 		case AUTH_ERROR:
-		    if (auth_->refresh(rreply.auth_error))
+		    if (client->authError(rreply.auth_error))
 			goto call_again;
 		    throw AuthError(rreply.auth_error);
 
@@ -418,11 +347,8 @@ call_again:
     }
 }
 
-LocalChannel::LocalChannel(
-    std::shared_ptr<ServiceRegistry> svcreg,
-    std::unique_ptr<Auth> auth)
-    : Channel(std::move(auth)),
-      bufferSize_(1500),	// XXX size
+LocalChannel::LocalChannel(std::shared_ptr<ServiceRegistry> svcreg)
+    : bufferSize_(1500),	// XXX size
       svcreg_(svcreg)
 {
 }
@@ -470,10 +396,14 @@ LocalChannel::close()
 {
 }
 
-SocketChannel::SocketChannel(int sock, std::unique_ptr<Auth> auth)
-    : Channel(std::move(auth)),
-      sock_(sock)
+SocketChannel::SocketChannel(int sock)
+    : sock_(sock)
 {
+}
+
+SocketChannel::~SocketChannel()
+{
+    close();
 }
 
 bool
@@ -522,12 +452,14 @@ SocketChannel::isWritable() const
 void
 SocketChannel::close()
 {
-    ::close(sock_);
+    if (sock_ != -1) {
+	::close(sock_);
+	sock_ = -1;
+    }
 }
 
-DatagramChannel::DatagramChannel(
-    int sock, std::unique_ptr<Auth> auth)
-    : SocketChannel(sock, std::move(auth)),
+DatagramChannel::DatagramChannel(int sock)
+    : SocketChannel(sock),
       bufferSize_(1500),
       xdrs_(std::make_unique<XdrMemory>(bufferSize_))
 {
@@ -587,9 +519,8 @@ DatagramChannel::endReply(std::unique_ptr<XdrSource>&& msg, bool skip)
     xdrs_.reset(static_cast<XdrMemory*>(msg.release()));
 }
 
-StreamChannel::StreamChannel(
-    int sock, std::unique_ptr<Auth> auth)
-    : SocketChannel(sock, std::move(auth)),
+StreamChannel::StreamChannel(int sock)
+    : SocketChannel(sock),
       bufferSize_(1500),
       sender_(
 	  std::make_unique<RecordWriter>(

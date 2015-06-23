@@ -3,6 +3,7 @@
 #include <sys/un.h>
 
 #include <rpc++/channel.h>
+#include <rpc++/client.h>
 #include <rpc++/rpcproto.h>
 #include <rpc++/server.h>
 #include <rpc++/xdr.h>
@@ -18,7 +19,8 @@ class ServerTest: public ::testing::Test
 {
 public:
     ServerTest()
-	: svcreg(make_shared<ServiceRegistry>())
+	: svcreg(make_shared<ServiceRegistry>()),
+	  client(make_shared<Client>(1234, 1))
     {
 	addTestService();
     }
@@ -89,6 +91,7 @@ public:
     }
 
     shared_ptr<ServiceRegistry> svcreg;
+    shared_ptr<Client> client;
 };
 
 TEST_F(ServerTest, Lookup)
@@ -163,7 +166,7 @@ TEST_F(ServerTest, Stream)
 
     // Send a message and check the reply
     chan->call(
-	1234, 1, 1,
+	client.get(), 1,
 	[](XdrSink* xdrs) { uint32_t v = 123; xdr(v, xdrs); },
 	[](XdrSource* xdrs) { uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
 
@@ -199,7 +202,7 @@ TEST_F(ServerTest, Listen)
     // Send a message and check the reply
     auto chan = make_shared<StreamChannel>(sock);
     chan->call(
-	1234, 1, 1,
+	client.get(), 1,
 	[](XdrSink* xdrs) { uint32_t v = 123; xdr(v, xdrs); },
 	[](XdrSource* xdrs) { uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
 

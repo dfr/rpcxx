@@ -17,5 +17,8 @@ cc_test(
     deps = [
         ":rpcxx",
         "//third_party/glog:glog",
-        "//third_party/gtest:gtest_main"]
+        "//third_party/gtest:gtest_main"],
+    #linkopts = ["-lgssapi_krb5"]
+    linkopts = ["-framework GSS"],
+    data = ["test.keytab"]
 )

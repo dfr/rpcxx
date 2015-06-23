@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <rpc++/channel.h>
+#include <rpc++/client.h>
 #include <rpc++/pmap.h>
 #include <rpc++/rpcbind.h>
 
@@ -316,8 +317,9 @@ void ping(const vector<string>& args, const options& opts)
     else {
 	// Use a null call on version 0 to get the version range
 	auto chan = connectChannel(addr.get());
+	auto cl = make_shared<Client>(program, 0);
 	try {
-	    chan->call(program, 0, 0, [](XdrSink*){}, [](XdrSource*){});
+	    chan->call(cl.get(), 0, [](XdrSink*){}, [](XdrSource*){});
 	}
 	catch (VersionMismatch& e) {
 	    for (auto i = e.minver(); i != e.maxver(); i++)
@@ -331,8 +333,9 @@ void ping(const vector<string>& args, const options& opts)
 
     for (auto version: versions) {
 	auto chan = connectChannel(addr.get());
+	auto cl = make_shared<Client>(program, version);
 	try {
-	    chan->call(program, version, 0, [](XdrSink*){}, [](XdrSource*){});
+	    chan->call(cl.get(), 0, [](XdrSink*){}, [](XdrSource*){});
 	}
 	catch (RpcError& e) {
 	    cout << "rpcinfo: " << e.what() << endl;

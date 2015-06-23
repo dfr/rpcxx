@@ -18,6 +18,7 @@
 
 namespace oncrpc {
 
+class Client;
 class XdrSink;
 class XdrSource;
 class RecordReader;
@@ -102,69 +103,19 @@ private:
     auth_stat stat_;
 };
 
-class Auth
-{
-public:
-    virtual ~Auth() {}
-    virtual void encode(opaque_auth& cred, opaque_auth& verf) = 0;
-    virtual bool validate(const opaque_auth& verf) = 0;
-    virtual bool refresh(auth_stat stat);
-
-private:
-    opaque_auth auth_;
-};
-
-class AuthNone: public Auth
-{
-    // Auth overrides
-    void encode(opaque_auth& cred, opaque_auth& verf) override;
-    bool validate(const opaque_auth& verf) override;
-};
-
-struct authsys_parms
-{
-    uint32_t stamp;
-    std::string machinename;
-    uint32_t uid;
-    uint32_t gid;
-    std::vector<uint32_t> gids;
-};
-
-template <typename XDR>
-void xdr(authsys_parms& v, XDR* xdrs)
-{
-    xdr(v.stamp, xdrs);
-    xdr(v.machinename, xdrs);
-    xdr(v.uid, xdrs);
-    xdr(v.gid, xdrs);
-    xdr(v.gids, xdrs);
-}
-
-class AuthSys: public Auth
-{
-    AuthSys();
-
-    // Auth overrides
-    void encode(opaque_auth& cred, opaque_auth& verf) override;
-    bool validate(const opaque_auth& verf) override;
-
-private:
-    std::vector<uint8_t> parms_;
-};
-
 class Channel: public std::enable_shared_from_this<Channel>
 {
 public:
     static std::chrono::seconds maxBackoff;
 
     /// Create an RPC channel
-    Channel(std::unique_ptr<Auth> auth);
+    Channel();
 
     ~Channel();
 
     /// Make a remote procedure call
     virtual void call(
-	uint32_t prog, uint32_t vers, uint32_t proc,
+	Client* client, uint32_t proc,
 	std::function<void(XdrSink*)> xargs,
 	std::function<void(XdrSource*)> xresults,
 	std::chrono::system_clock::duration timeout = std::chrono::seconds(30));
@@ -205,6 +156,7 @@ protected:
 	{
 	}
 
+	uint32_t seq;
 	bool sleeping = false;
 	std::unique_ptr<std::condition_variable> cv; // signalled when ready
 	rpc_msg reply;
@@ -213,7 +165,6 @@ protected:
 
     uint32_t xid_;
     std::chrono::system_clock::duration retransmitInterval_;
-    std::unique_ptr<Auth> auth_;
 
     // The mutex serialises access to running_, pending_ and all
     // transactions contained in pending_
@@ -222,13 +173,12 @@ protected:
     std::unordered_map<uint32_t, Transaction> pending_; // in-flight calls
 };
 
-/// Process RPC calls using the given registry of local services. Thread safe.
+/// Process RPC calls using the given registry of local
+/// services. Thread safe.
 class LocalChannel: public Channel
 {
 public:
-    LocalChannel(
-	std::shared_ptr<ServiceRegistry> svcreg,
-	std::unique_ptr<Auth> auth = nullptr);
+    LocalChannel(std::shared_ptr<ServiceRegistry> svcreg);
 
     // Channel overrides
     std::unique_ptr<XdrSink> beginCall() override;
@@ -248,8 +198,9 @@ private:
 class SocketChannel: public Channel
 {
 public:
-    SocketChannel(
-	int sock, std::unique_ptr<Auth> auth = nullptr);
+    SocketChannel(int sock);
+
+    ~SocketChannel();
 
     /// Wait for the socket to become readable with the given
     /// timeout. Return true if the socket is readable or false if the
@@ -274,8 +225,7 @@ protected:
 class DatagramChannel: public SocketChannel
 {
 public:
-    DatagramChannel(
-	int sock, std::unique_ptr<Auth> auth = nullptr);
+    DatagramChannel(int sock);
 
     // Channel overrides
     std::unique_ptr<XdrSink> beginCall() override;
@@ -293,8 +243,7 @@ private:
 class StreamChannel: public SocketChannel
 {
 public:
-    StreamChannel(
-	int sock, std::unique_ptr<Auth> auth = nullptr);
+    StreamChannel(int sock);
 
     ~StreamChannel();
 

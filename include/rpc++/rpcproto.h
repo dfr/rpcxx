@@ -19,7 +19,7 @@ enum auth_flavor: uint32_t {
 
 struct opaque_auth {
     auth_flavor flavor;
-    std::vector<uint8_t> auth_body;
+    bounded_vector<uint8_t, 400> auth_body;
 };
 
 template <typename XDR>
@@ -183,25 +183,34 @@ struct reply_body {
     }
 
     reply_body(reply_body&& other)
-	: stat(other.stat)
     {
-	switch (stat) {
-	case MSG_ACCEPTED:
-	    new(&storage) accepted_reply(std::move(other.areply()));
-	    break;
-	case MSG_DENIED:
-	    new(&storage) rejected_reply(std::move(other.rreply()));
-	    break;
-	default:
-	    break;
-	}
-	hasValue = true;
-	other.clear();
+	*this = std::move(other);
     }
 
     ~reply_body()
     {
 	clear();
+    }
+
+    reply_body& operator=(reply_body&& other)
+    {
+	clear();
+	stat = other.stat;
+	if (other.hasValue) {
+	    switch (stat) {
+	    case MSG_ACCEPTED:
+		new(&storage) accepted_reply(std::move(other.areply()));
+		break;
+	    case MSG_DENIED:
+		new(&storage) rejected_reply(std::move(other.rreply()));
+		break;
+	    default:
+		break;
+	    }
+	    hasValue = true;
+	    other.clear();
+	}
+	return *this;
     }
 
     void clear()
@@ -291,9 +300,36 @@ struct rpc_msg {
 	hasValue = true;
     }
 
+    rpc_msg(rpc_msg&& other)
+    {
+	*this = std::move(other);
+    }
+
     ~rpc_msg()
     {
 	clear();
+    }
+
+    rpc_msg& operator=(rpc_msg&& other)
+    {
+	clear();
+	xid = other.xid;
+	mtype = other.mtype;
+	if (other.hasValue) {
+	    switch (mtype) {
+	    case CALL:
+		new(&storage) call_body(std::move(other.cbody()));
+		break;
+	    case REPLY:
+		new(&storage) reply_body(std::move(other.rbody()));
+		break;
+	    default:
+		break;
+	    }
+	    hasValue = true;
+	    other.clear();
+	}
+	return *this;
     }
 
     void clear()
@@ -328,10 +364,22 @@ struct rpc_msg {
 	return *reinterpret_cast<call_body*>(&storage);
     }
 
+    const call_body& cbody() const
+    {
+	assert(hasValue && mtype == CALL);
+	return *reinterpret_cast<const call_body*>(&storage);
+    }
+
     reply_body& rbody()
     {
 	assert(hasValue && mtype == REPLY);
 	return *reinterpret_cast<reply_body*>(&storage);
+    }
+
+    const reply_body& rbody() const
+    {
+	assert(hasValue && mtype == REPLY);
+	return *reinterpret_cast<const reply_body*>(&storage);
     }
 };
 
