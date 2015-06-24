@@ -327,9 +327,8 @@ TEST_F(GssTest, Init)
     ::gethostname(hbuf, sizeof(hbuf));
     string principal = "host@";
     principal += hbuf;
-    client = make_shared<Client>(
-	1234, 1,
-	make_unique<GssAuth>(principal, "krb5", RPCSEC_GSS_SVC_NONE));
+    client = make_shared<GssClient>(
+	1234, 1, principal, "krb5", RPCSEC_GSS_SVC_NONE);
 
     // Send a message and check the reply
     auto chan = make_shared<StreamChannel>(clsock);

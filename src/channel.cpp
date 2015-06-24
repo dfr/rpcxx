@@ -7,7 +7,6 @@
 
 #include <glog/logging.h>
 
-#include <rpc++/auth.h>
 #include <rpc++/channel.h>
 #include <rpc++/client.h>
 #include <rpc++/rec.h>
@@ -153,7 +152,7 @@ call_again:
 	// Drop the lock while we transmit
 	lock.unlock();
 	auto xdrout = beginCall();
-	tx.seq = client->processCall(this, xid, proc, xdrout.get(), xargs);
+	tx.seq = client->processCall(xid, proc, xdrout.get(), xargs);
 	endCall(std::move(xdrout));
 	lock.lock();
 

@@ -57,11 +57,13 @@ report_error(gss_OID mech, uint32_t maj, uint32_t min)
     throw RpcError(ss.str());
 }
 
-GssAuth::GssAuth(
+GssClient::GssClient(
+    uint32_t program, uint32_t version,
     const string& principal,
     const string& mechanism,
     rpc_gss_service_t service)
-    : context_(GSS_C_NO_CONTEXT),
+    : Client(program, version),
+      context_(GSS_C_NO_CONTEXT),
       cred_(GSS_C_NO_CREDENTIAL),
       principal_(GSS_C_NO_NAME),
       state_{ RPCSEC_GSS_INIT, 1, service }
@@ -87,7 +89,7 @@ GssAuth::GssAuth(
 }
 
 void
-GssAuth::init(Client* client, Channel* channel)
+GssClient::validateAuth(Channel* channel)
 {
     uint32_t maj_stat, min_stat;
 
@@ -122,7 +124,7 @@ GssAuth::init(Client* client, Channel* channel)
 	if (output_token.length > 0) {
 	    rpc_gss_init_res res;
 	    channel->call(
-		client, 0,
+		this, 0,
 		[&output_token](XdrSink* xdrs) {
 		    // We free the output token as soon as we have written
 		    // it to the stream so that we don't have to worry
@@ -171,8 +173,9 @@ GssAuth::init(Client* client, Channel* channel)
 }
 
 uint32_t
-GssAuth::encode(
-    uint32_t xid, uint32_t prog, uint32_t vers, uint32_t proc, XdrSink* xdrs)
+GssClient::processCall(
+    uint32_t xid, uint32_t proc, XdrSink* xdrs,
+    std::function<void(XdrSink*)> xargs)
 {
     uint8_t credbuf[400];
     uint32_t credlen;
@@ -194,12 +197,7 @@ GssAuth::encode(
 
     {
 	XdrMemory xdrcall(callbuf, sizeof(callbuf));
-	xdrcall.putWord(xid);
-	xdrcall.putWord(CALL);
-	xdrcall.putWord(2);
-	xdrcall.putWord(prog);
-	xdrcall.putWord(vers);
-	xdrcall.putWord(proc);
+	encodeCall(xid, proc, &xdrcall);
 	xdrcall.putWord(RPCSEC_GSS);
 	xdrcall.putWord(credlen);
 	xdrcall.putBytes(credbuf, credlen);
@@ -226,15 +224,25 @@ GssAuth::encode(
 	xdrs->putWord(AUTH_NONE);
 	xdrs->putWord(0);
     }
+    xargs(xdrs);
+
     return seq;
 }
 
 bool
-GssAuth::validate(uint32_t seq, opaque_auth& verf)
+GssClient::processReply(
+    uint32_t seq,
+    accepted_reply& areply,
+    XdrSource* xdrs, std::function<void(XdrSource*)> xresults)
 {
-    // Save the verifier so that we can verify the sequence window
-    // after establishing a context
+    // Make sure we read the results before any decision on what to do
+    // with the verifier
+    xresults(xdrs);
+
+    auto& verf = areply.verf;
     if (state_.gss_proc != RPCSEC_GSS_DATA) {
+	// Save the verifier so that we can verify the sequence window
+	// after establishing a context
 	if (verf.flavor == RPCSEC_GSS)
 	    verf_ = verf.auth_body;
 	else
@@ -260,10 +268,3 @@ GssAuth::validate(uint32_t seq, opaque_auth& verf)
 
     return true;
 }
-
-bool
-GssAuth::refresh(auth_stat stat)
-{
-    return true;
-}
-

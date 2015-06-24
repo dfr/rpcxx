@@ -2,35 +2,52 @@
 
 #pragma once
 
-#include <rpc++/auth.h>
+#include <functional>
 
 namespace oncrpc {
 
-/// Common state for all calls to a given service on some channel
+/// An RPC client which makes calls on some channel using AUTH_NONE
+/// authentication
 class Client
 {
 public:
-    Client(uint32_t program, uint32_t version,
-	   std::unique_ptr<Auth> auth = nullptr);
+    Client(uint32_t program, uint32_t version);
 
     uint32_t program() const { return program_; }
     uint32_t version() const { return version_; }
     
-    void validateAuth(Channel* chan);
-    uint32_t processCall(
-	Channel* chan, uint32_t xid, uint32_t proc,
-	XdrSink* xdrs, std::function<void(XdrSink*)> xargs);
-    void processReply(
+    virtual void validateAuth(Channel* chan) {}
+    virtual uint32_t processCall(
+	uint32_t xid, uint32_t proc, XdrSink* xdrs,
+	std::function<void(XdrSink*)> xargs);
+    virtual bool processReply(
 	uint32_t seq,
 	accepted_reply& areply,
 	XdrSource* xdrs, std::function<void(XdrSource*)> xresults);
-    bool authError(auth_stat stat);
+    virtual bool authError(auth_stat stat);
+
+protected:
+    void encodeCall(
+	uint32_t xid, uint32_t proc,
+	XdrSink* xdrs);
 
 private:
     uint32_t program_;
     uint32_t version_;
-    std::unique_ptr<Auth> auth_;
 };
 
+/// An RPC client using AUTH_SYS authentication
+class SysClient: public Client
+{
+public:
+    SysClient(uint32_t program, uint32_t version);
+
+    uint32_t processCall(
+	uint32_t xid, uint32_t proc, XdrSink* xdrs,
+	std::function<void(XdrSink*)> xargs) override;
+
+private:
+    std::vector<uint8_t> cred_;
+};
 
 }

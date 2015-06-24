@@ -8,27 +8,29 @@
 #include <gssapi/gssapi.h>
 #endif
 
-#include <rpc++/auth.h>
+#include <rpc++/client.h>
 #include <rpc++/rpcsec_gss.h>
 
 namespace oncrpc {
 
-/// Client-side authentication mechanism which implements RPCSEC_GSS
-/// version 1.
-class GssAuth: public Auth
+/// An RPC client using RPCSEC_GSS version 1 authentication
+class GssClient: public Client
 {
 public:
-    GssAuth(
-	const std::string& principal,
-	const std::string& mechanism,
-	rpc_gss_service_t service);
+    GssClient(uint32_t program, uint32_t version,
+	      const std::string& principal,
+	      const std::string& mechanism,
+	      rpc_gss_service_t service);
 
-    void init(Client* client, Channel* channel) override;
-    uint32_t encode(
-	uint32_t xid, uint32_t prog, uint32_t vers, uint32_t proc,
-	XdrSink* xdrs) override;
-    bool validate(uint32_t seq, opaque_auth& verf) override;
-    bool refresh(auth_stat stat) override;
+    void validateAuth(Channel* chan) override;
+    uint32_t processCall(
+	uint32_t xid, uint32_t proc, XdrSink* xdrs,
+	std::function<void(XdrSink*)> xargs) override;
+    bool processReply(
+	uint32_t seq,
+	accepted_reply& areply,
+	XdrSource* xdrs, std::function<void(XdrSource*)> xresults) override;
+    //bool authError(auth_stat stat) override;
 
 private:
     gss_OID_desc* mech_;	  // GSS-API mechanism
