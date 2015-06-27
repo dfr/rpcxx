@@ -26,6 +26,7 @@ constexpr uint32_t MAXSEQ = 0x80000000;
 
 struct rpc_gss_cred_vers_1_t
 {
+    uint32_t gss_ver = 1;
     rpc_gss_proc_t gss_proc;	// control procedure
     uint32_t seq_num;		// sequence number
     rpc_gss_service_t service;	// service used
@@ -35,6 +36,7 @@ struct rpc_gss_cred_vers_1_t
 template <typename XDR>
 void xdr(rpc_gss_cred_vers_1_t& v, XDR* xdrs)
 {
+    xdr(v.gss_ver, xdrs);
     xdr(reinterpret_cast<uint32_t&>(v.gss_proc), xdrs);
     xdr(v.seq_num, xdrs);
     xdr(reinterpret_cast<uint32_t&>(v.service), xdrs);

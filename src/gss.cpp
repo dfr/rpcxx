@@ -20,7 +20,7 @@ GssClient::GssClient(
       context_(GSS_C_NO_CONTEXT),
       cred_(GSS_C_NO_CREDENTIAL),
       principal_(GSS_C_NO_NAME),
-      state_{ RPCSEC_GSS_INIT, 1, service }
+      state_{ 1, RPCSEC_GSS_INIT, 1, service }
 {
     static gss_OID_desc krb5_desc =
 	{9, (void *)"\x2a\x86\x48\x86\xf7\x12\x01\x02\x02"};

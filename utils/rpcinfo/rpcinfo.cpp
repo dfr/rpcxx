@@ -210,7 +210,7 @@ void listServices(const vector<string>& args, const options& opts)
     else
 	host = "localhost";
 
-    RpcBind chan(connectChannel(host, opts));
+    RpcBind rpcbind(connectChannel(host, opts));
 
     if (opts.shortFormat) {
 	struct programInfo
@@ -221,7 +221,7 @@ void listServices(const vector<string>& args, const options& opts)
 	};
 	map<uint32_t, programInfo> programs;
 
-	auto p0 = chan.dump();
+	auto p0 = rpcbind.dump();
 	for (auto p = p0.get(); p; p = p->rpcb_next.get()) {
 	    const auto& map = p->rpcb_map;
 	    auto& prog = programs[map.r_prog];
@@ -244,7 +244,7 @@ void listServices(const vector<string>& args, const options& opts)
 	TableFormatter<10, 10, 10, 24, 12, 12> tf(cout);
 	tf("program", "version", "netid", "address", "service", "owner");
 
-	auto p0 = chan.dump();
+	auto p0 = rpcbind.dump();
 	for (auto p = p0.get(); p; p = p->rpcb_next.get()) {
 	    const auto& map = p->rpcb_map;
 	    tf(map.r_prog, map.r_vers, map.r_netid, map.r_addr,
