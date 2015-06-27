@@ -2,60 +2,14 @@
 #include <iostream>
 #include <sstream>
 
-#include <CoreFoundation/CoreFoundation.h>
-
 #include <rpc++/channel.h>
 #include <rpc++/gss.h>
 #include <rpc++/util.h>
 
 using namespace oncrpc;
+using namespace oncrpc::_gssdetail;
 using namespace std;
 
-[[noreturn]] static void
-report_error(gss_OID mech, uint32_t maj, uint32_t min)
-{
-    {
-	CFErrorRef err = GSSCreateError(mech, maj, min);
-	CFStringRef str = CFErrorCopyDescription(err);
-	char buf[512];
-	CFStringGetCString(str, buf, 512, kCFStringEncodingUTF8);
-	cout << buf << endl;
-    }
-
-    uint32_t maj_stat, min_stat;
-    uint32_t message_context;
-    gss_buffer_desc buf;
-    ostringstream ss;
-
-    ss << "GSS-API error: "
-       << "major_stat=" << maj
-       << ", minor_stat=" << min
-       << ": ";
-
-    message_context = 0;
-    do {
-	maj_stat = gss_display_status(
-	    &min_stat, maj, GSS_C_GSS_CODE, GSS_C_NO_OID,
-	    &message_context, &buf);
-	if (message_context != 0)
-	    ss << ", ";
-	ss << string((const char*) buf.value, buf.length);
-	gss_release_buffer(&min_stat, &buf);
-    } while (message_context);
-    if (mech) {
-	message_context = 0;
-	do {
-	    maj_stat = gss_display_status(
-		&min_stat, min, GSS_C_MECH_CODE, mech,
-		&message_context, &buf);
-	    if (message_context != 0)
-		ss << ", ";
-	    ss << string((const char*) buf.value, buf.length);
-	    gss_release_buffer(&min_stat, &buf);
-	} while (message_context);
-    }
-    throw RpcError(ss.str());
-}
 
 GssClient::GssClient(
     uint32_t program, uint32_t version,
@@ -84,8 +38,20 @@ GssClient::GssClient(
     maj_stat = gss_import_name(
 	&min_stat, &name_desc, GSS_C_NT_HOSTBASED_SERVICE, &principal_);
     if (GSS_ERROR(maj_stat)) {
-	report_error(mech_, maj_stat, min_stat);
+	reportError(mech_, maj_stat, min_stat);
     }
+}
+
+GssClient::~GssClient()
+{
+    uint32_t min_stat;
+
+    if (context_)
+	gss_delete_sec_context(&min_stat, &context_, GSS_C_NO_BUFFER);
+    if (cred_)
+	gss_release_cred(&min_stat, &cred_);
+    if (principal_)
+	gss_release_name(&min_stat, &principal_);
 }
 
 void
@@ -95,6 +61,8 @@ GssClient::validateAuth(Channel* channel)
 
     if (context_ != GSS_C_NO_CONTEXT)
 	return;
+
+    VLOG(2) << "Creating GSS-API context";
 
     // Establish the GSS-API context with the remote service
     vector<uint8_t> input_token;
@@ -117,11 +85,15 @@ GssClient::validateAuth(Channel* channel)
 	    nullptr);
 	if (maj_stat != GSS_S_COMPLETE &&
 	    maj_stat != GSS_S_CONTINUE_NEEDED) {
-	    report_error(mech_, maj_stat, min_stat);
+	    reportError(mech_, maj_stat, min_stat);
 	}
 	input_token = {};
 
 	if (output_token.length > 0) {
+	    VLOG(2) << "Sending "
+		    << (state_.gss_proc == RPCSEC_GSS_INIT
+			? "RPCSEC_GSS_INIT" : "RPCSEC_GSS_CONTINUE_INIT")
+		    << " with " << output_token.length << " byte token";
 	    rpc_gss_init_res res;
 	    channel->call(
 		this, 0,
@@ -129,10 +101,8 @@ GssClient::validateAuth(Channel* channel)
 		    // We free the output token as soon as we have written
 		    // it to the stream so that we don't have to worry
 		    // about it if the channel throws an exception
-		    uint32_t len = output_token.length;
-		    xdr(len, xdrs);
-		    xdrs->putBytes(
-			static_cast<uint8_t*>(output_token.value), len);
+		    xdrs->putWord(output_token.length);
+		    xdrs->putBytes(output_token.value, output_token.length);
 		    uint32_t min_stat;
 		    gss_release_buffer(&min_stat, &output_token);
 		},
@@ -141,9 +111,10 @@ GssClient::validateAuth(Channel* channel)
 		});
 
 	    if (GSS_ERROR(res.gss_major)) {
-		report_error(mech_, res.gss_major, res.gss_minor);
+		reportError(mech_, res.gss_major, res.gss_minor);
 	    }
 
+	    VLOG(2) << "Received " << res.gss_token.size() << " byte token";
 	    input_token = move(res.gss_token);
 	    state_.handle = move(res.handle);
 	    seq_window_ = res.seq_window;
@@ -166,7 +137,7 @@ GssClient::validateAuth(Channel* channel)
     maj_stat = gss_verify_mic(
 	&min_stat, context_, &message, &token, &qop);
     if (GSS_ERROR(maj_stat)) {
-	report_error(mech_, maj_stat, min_stat);
+	reportError(mech_, maj_stat, min_stat);
     }
     verf_ = {};
     // XXX verify qop here
@@ -213,18 +184,24 @@ GssClient::processCall(
 	maj_stat = gss_get_mic(
 	    &min_stat, context_, GSS_C_QOP_DEFAULT, &buf, &mic);
 	if (GSS_ERROR(maj_stat)) {
-	    report_error(mech_, maj_stat, min_stat);
+	    reportError(mech_, maj_stat, min_stat);
 	}
 	xdrs->putWord(RPCSEC_GSS);
 	xdrs->putWord(mic.length);
-	xdrs->putBytes(static_cast<uint8_t*>(mic.value), mic.length);
+	xdrs->putBytes(mic.value, mic.length);
 	gss_release_buffer(&min_stat, &mic);
     }
     else {
 	xdrs->putWord(AUTH_NONE);
 	xdrs->putWord(0);
     }
-    xargs(xdrs);
+
+    if (state_.gss_proc != RPCSEC_GSS_DATA) {
+	xargs(xdrs);
+    }
+    else {
+	encodeBody(context_, mech_, state_.service, seq, xargs, xdrs);
+    }
 
     return seq;
 }
@@ -235,11 +212,8 @@ GssClient::processReply(
     accepted_reply& areply,
     XdrSource* xdrs, std::function<void(XdrSource*)> xresults)
 {
-    // Make sure we read the results before any decision on what to do
-    // with the verifier
-    xresults(xdrs);
-
     auto& verf = areply.verf;
+
     if (state_.gss_proc != RPCSEC_GSS_DATA) {
 	// Save the verifier so that we can verify the sequence window
 	// after establishing a context
@@ -247,7 +221,16 @@ GssClient::processReply(
 	    verf_ = verf.auth_body;
 	else
 	    verf_ = {};
+	xresults(xdrs);
 	return true;
+    }
+    else {
+	// Make sure we read the results before any decision on what
+	// to do with the verifier so that we don't get out of phase
+	// with the underlying channel
+	if (!decodeBody(
+		context_, mech_, state_.service, seq, xresults, xdrs))
+	    return false;
     }
 
     if (verf.flavor != RPCSEC_GSS)
@@ -263,7 +246,7 @@ GssClient::processReply(
 	if (maj_stat == GSS_S_CONTEXT_EXPIRED) {
 	    // XXX destroy context and re-init
 	}
-	report_error(mech_, maj_stat, min_stat);
+	reportError(mech_, maj_stat, min_stat);
     }
 
     return true;

@@ -17,9 +17,9 @@ enum rpc_gss_proc_t: uint32_t {
 /// RPCSEC_GSS services
 enum rpc_gss_service_t: uint32_t {
     /* Note: the enumerated value for 0 is reserved. */
-    RPCSEC_GSS_SVC_NONE = 1,
-    RPCSEC_GSS_SVC_INTEGRITY = 2,
-    RPCSEC_GSS_SVC_PRIVACY = 3
+    rpcsec_gss_svc_none = 1,
+    rpcsec_gss_svc_integrity = 2,
+    rpcsec_gss_svc_privacy = 3
 };
 
 constexpr uint32_t MAXSEQ = 0x80000000;

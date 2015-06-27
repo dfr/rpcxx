@@ -93,6 +93,10 @@ public:
     /// Write a sequence of bytes to the stream and pad to the nearest
     /// 32-bit boundary with zeros
     virtual void putBytes(const uint8_t* p, size_t len) = 0;
+    void putBytes(const void* p, size_t len)
+    {
+	putBytes(static_cast<const uint8_t*>(p), len);
+    }
 };
 
 
@@ -107,6 +111,10 @@ public:
     /// Read a sequence of bytes from the stream and skip the
     /// following padding up to the next 32-bit boundary
     virtual void getBytes(uint8_t* p, size_t len) = 0;
+    void getBytes(void* p, size_t len)
+    {
+	getBytes(static_cast<uint8_t*>(p), len);
+    }
 };
 
 inline void xdr(uint32_t v, XdrSink* xdrs)
@@ -363,6 +371,10 @@ public:
 
     /// Create a memory encoder/decoder which uses external storage
     XdrMemory(uint8_t* p, size_t sz);
+    XdrMemory(void* p, size_t sz)
+	: XdrMemory(static_cast<uint8_t*>(p), sz)
+    {
+    }
 
     uint8_t* buf() const
     {
@@ -407,6 +419,37 @@ private:
     uint8_t* next_;
     uint8_t* limit_;
 };
+
+class XdrSizer: public XdrSink
+{
+public:
+    size_t size() const
+    {
+	return size_;
+    }
+
+    // XdrSink overrides
+    void putWord(uint32_t v) override
+    {
+	size_ += sizeof(v);
+    }
+
+    void putBytes(const uint8_t* p, size_t len) override
+    {
+	size_ += __round(len);
+    }
+
+private:
+    size_t size_ = 0;
+};
+
+template <typename T>
+size_t XdrSizeof(const T& v)
+{
+    XdrSizer xdrs;
+    xdr(v, &xdrs);
+    return xdrs.size();
+}
 
 /// Expands to either T& or const T& depending on whether XDR is
 /// XdrSource or XdrSink

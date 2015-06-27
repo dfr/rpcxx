@@ -4,7 +4,13 @@
 
 #include <functional>
 
+#include <rpc++/rpcproto.h>
+
 namespace oncrpc {
+
+class Channel;
+class XdrSink;
+class XdrSource;
 
 /// An RPC client which makes calls on some channel using AUTH_NONE
 /// authentication

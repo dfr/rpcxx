@@ -140,7 +140,7 @@ call_again:
     std::unique_lock<std::mutex> lock(mutex_);
 
     auto xid = xid_++;
-    VLOG(2) << "thread: " << std::this_thread::get_id()
+    VLOG(3) << "thread: " << std::this_thread::get_id()
 	    << " xid: " << xid << ": new call";
     auto i = pending_.emplace(xid, std::move(Transaction()));
     auto& tx = i.first->second;
@@ -171,7 +171,7 @@ call_again:
 		if (running_) {
 		    // Someone else is reading replies, wait until they wake
 		    // us or until we time out.
-		    VLOG(2) << "thread: " << std::this_thread::get_id()
+		    VLOG(3) << "thread: " << std::this_thread::get_id()
 			    << " xid: " << xid
 			    << ": waiting for other thread";
 		    tx.sleeping = true;
@@ -187,7 +187,7 @@ call_again:
 		}
 		else {
 		    running_ = true;
-		    VLOG(2) << "thread: " << std::this_thread::get_id()
+		    VLOG(3) << "thread: " << std::this_thread::get_id()
 			    << " xid: " << xid
 			    << ": waiting for reply";
 		    lock.unlock();
@@ -207,13 +207,13 @@ call_again:
 
 	    // This may be some other thread's reply. Find them and
 	    // wake them up to process it
-	    VLOG(2) << "thread: " << std::this_thread::get_id()
+	    VLOG(3) << "thread: " << std::this_thread::get_id()
 		    << " xid: " << tx.reply.xid
 		    << ": finding transaction";
 	    assert(lock);
 	    auto i = pending_.find(tx.reply.xid);
 	    if (i != pending_.end()) {
-		VLOG(2) << "thread: " << std::this_thread::get_id()
+		VLOG(3) << "thread: " << std::this_thread::get_id()
 			<< " xid: " << tx.reply.xid
 			<< ": waking thread";
 		auto& other = i->second;
@@ -224,7 +224,7 @@ call_again:
 	    else {
 		// If we don't find the transaction, just drop
 		// it. This can happen for retransmits.
-		VLOG(2) << "thread: " << std::this_thread::get_id()
+		VLOG(3) << "thread: " << std::this_thread::get_id()
 			<< " xid: " << tx.reply.xid
 			<< ": dropping message";
 		tx.reply.xid = 0;
@@ -243,7 +243,7 @@ call_again:
 		pending_.erase(xid);
 		throw RpcError("call timeout");
 	    }
-	    VLOG(2) << "thread: " << std::this_thread::get_id()
+	    VLOG(3) << "thread: " << std::this_thread::get_id()
 		    << " xid: " << xid
 		    << ": retransmitting";
 	    nretries++;
@@ -253,11 +253,12 @@ call_again:
 	}
 
 	assert(tx.reply.xid == xid);
-	VLOG(2) << "thread: " << std::this_thread::get_id()
+	VLOG(3) << "thread: " << std::this_thread::get_id()
 		<< " xid: " << xid << ": reply received";
 
 	auto reply_msg = std::move(tx.reply);
 	auto xdrin = std::move(tx.body);
+	auto seq = tx.seq;
 	assert(lock);
 	pending_.erase(xid);
 
@@ -271,7 +272,7 @@ call_again:
 	    }
 	    if (liveThreads == 0) {
 		auto i = pending_.begin();
-		VLOG(2) << "thread: " << std::this_thread::get_id()
+		VLOG(3) << "thread: " << std::this_thread::get_id()
 			<< " waking thread for" << " xid: " << i->first;
 		i->second.cv->notify_one();
 	    }
@@ -283,7 +284,7 @@ call_again:
 	    && reply_msg.rbody().stat == MSG_ACCEPTED
 	    && reply_msg.rbody().areply().stat == SUCCESS) {
 	    client->processReply(
-		tx.seq, reply_msg.rbody().areply(), xdrin.get(), xresults);
+		seq, reply_msg.rbody().areply(), xdrin.get(), xresults);
 	    endReply(std::move(xdrin), false);
 	    break;
 	}
@@ -576,10 +577,10 @@ readAll(int sock, void* buf, size_t len)
 std::unique_ptr<XdrSource>
 StreamChannel::beginReply(std::chrono::system_clock::duration timeout)
 {
-    VLOG(2) << "waiting for reply";
+    VLOG(3) << "waiting for reply";
     if (!waitForReadable(timeout))
 	return nullptr;
-    VLOG(2) << "socket is readable";
+    VLOG(3) << "socket is readable";
 
     bool done = false;
     std::deque<std::unique_ptr<XdrMemory>> fragments;
@@ -626,7 +627,7 @@ StreamChannel::write(const void* buf, size_t len)
     auto p = reinterpret_cast<const uint8_t*>(buf);
     auto n = len;
 
-    VLOG(2) << "writing " << len << " bytes to socket";
+    VLOG(3) << "writing " << len << " bytes to socket";
     while (n > 0) {
 	auto bytes = ::write(sock_, p, len);
 	if (bytes < 0)

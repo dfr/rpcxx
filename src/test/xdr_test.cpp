@@ -129,5 +129,14 @@ TEST_F(XdrTest, BoundedString)
     EXPECT_THROW(xdr(b, static_cast<XdrSource*>(xdrs.get())), XdrError);
 }
 
+TEST_F(XdrTest, Sizeof)
+{
+    EXPECT_EQ(4, XdrSizeof(42));
+    EXPECT_EQ(16, XdrSizeof(array<int, 4>{1, 2, 3, 4}));
+    EXPECT_EQ(20, XdrSizeof(vector<int>{1, 2, 3, 4}));
+    EXPECT_EQ(8, XdrSizeof(array<uint8_t, 7>{0}));
+    EXPECT_EQ(12, XdrSizeof(string("Hello")));
+}
+
 }
 
