@@ -363,7 +363,4 @@ interface RPCBind4
 }
 #endif
 
-std::unique_ptr<AddressInfo> uaddr2taddr(
-    int family, int socktype, const std::string& uaddr);
-
 }

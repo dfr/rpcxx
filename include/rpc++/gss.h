@@ -20,6 +20,8 @@ namespace _gssdetail {
 
 [[noreturn]] void reportError(gss_OID mech, uint32_t maj, uint32_t min);
 
+/// Decode a message body given the RPCSEC_GSS service and sequence
+/// number
 template <typename F>
 bool decodeBody(
     gss_ctx_id_t context, gss_OID mech,
@@ -100,7 +102,7 @@ bool decodeBody(
 // Build an rpc_gss_data_t as specified in RFC 2203 section 5.3.2.2
 template <typename F>
 static std::vector<uint8_t>
-encapsulateBody(uint8_t seq, F&& xbody)
+_encapsulateBody(const uint32_t seq, F&& xbody)
 {
     XdrSizer xsz;
     xdr(seq, &xsz);
@@ -112,6 +114,8 @@ encapsulateBody(uint8_t seq, F&& xbody)
     return std::move(body);
 }
 
+/// Encode a message body given the RPCSEC_GSS service and sequence
+/// number
 template <typename F>
 void encodeBody(
     gss_ctx_id_t context, gss_OID mech,
@@ -125,7 +129,7 @@ void encodeBody(
 
     case rpcsec_gss_svc_integrity: {
 	// Serialise the body and sequence number
-	std::vector<uint8_t> body = encapsulateBody(seq, xbody);
+	std::vector<uint8_t> body = _encapsulateBody(seq, xbody);
 
 	// Checksum the body and write both to the channel
 	uint32_t maj_stat, min_stat;
@@ -146,7 +150,7 @@ void encodeBody(
 
     case rpcsec_gss_svc_privacy: {
 	// Serialise the body and sequence number
-	std::vector<uint8_t> body = encapsulateBody(seq, xbody);
+	std::vector<uint8_t> body = _encapsulateBody(seq, xbody);
 
 	// Wrap the body and write the wrap token to the channel
 	uint32_t maj_stat, min_stat;

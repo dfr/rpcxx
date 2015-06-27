@@ -71,7 +71,7 @@ enum Mode {
 struct options
 {
     Mode mode = ListServices;
-    string transport;
+    string transport = "tcp";
     string serviceAddress;
     bool broadcast = false;
     bool deleteRegistration = false;
@@ -137,56 +137,16 @@ string lookupProgram(unsigned prog)
     return "???";
 }
 
-std::shared_ptr<Channel> connectChannel(
-    const std::string& host, const options& opts)
+shared_ptr<Channel> connectChannel(
+    const string& host, const options& opts)
 {
-    string service = std::to_string(opts.port);
-
-    int sock;
-    int socktype = SOCK_STREAM;
     try {
-	sock = connectSocket(host, service, socktype);
+	return connectChannel(host, to_string(opts.port), opts.transport);
     }
-    catch (std::runtime_error& e) {
+    catch (runtime_error& e) {
 	cout << "rpcinfo: " << e.what() << endl;
 	exit(1);
     }
-
-    if (socktype == SOCK_STREAM)
-	return std::make_shared<StreamChannel>(sock);
-    else
-	return std::make_shared<DatagramChannel>(sock);
-}
-
-std::shared_ptr<Channel> connectChannel(const AddressInfo* addr)
-{
-    string cause = "";
-    std::error_code ec;
-    int s;
-
-    s = socket(addr->family, addr->socktype, addr->protocol);
-    if (s < 0) {
-	cause = "socket";
-	ec = std::error_code(errno, std::system_category());
-    }
-    else {
-	if (connect(s, addr->addr, addr->addrlen) < 0) {
-	    cause = "connect";
-	    ec = std::error_code(errno, std::system_category());
-	    close(s);
-	    s = -1;
-	}
-    }
-
-    if (s == -1) {
-	cerr << "rpcinfo: " << cause << ": " << ec.message() << endl;
-	exit(1);
-    }
-
-    if (addr->socktype == SOCK_STREAM)
-	return std::make_shared<StreamChannel>(s);
-    else
-	return std::make_shared<DatagramChannel>(s);
 }
 
 template <typename T>
@@ -285,7 +245,7 @@ void listServicesV2(const vector<string>& args, const options& opts)
 	    prot = "local";
 	    break;
 	default:
-	    prot = std::to_string(map.prot);
+	    prot = to_string(map.prot);
 	}
 	tf(map.prog, map.vers, prot, map.port, lookupProgram(map.prog));
     }
@@ -309,20 +269,21 @@ void ping(const vector<string>& args, const options& opts)
 	cout << "rpcinfo: RPC: Program not registered" << endl;
 	exit(1);
     }
-    auto addr = uaddr2taddr(PF_UNSPEC, SOCK_STREAM, uaddr);
+
+    auto addr = uaddr2taddr(uaddr, opts.transport);
+    auto chan = connectChannel(move(addr));
 
     vector<uint32_t> versions;
     if (args.size() == 3)
 	versions.push_back(stoi(args[2]));
     else {
 	// Use a null call on version 0 to get the version range
-	auto chan = connectChannel(addr.get());
-	auto cl = make_shared<Client>(program, 0);
 	try {
+	    auto cl = make_shared<Client>(program, 0);
 	    chan->call(cl.get(), 0, [](XdrSink*){}, [](XdrSource*){});
 	}
 	catch (VersionMismatch& e) {
-	    for (auto i = e.minver(); i != e.maxver(); i++)
+	    for (auto i = e.minver(); i <= e.maxver(); i++)
 		versions.push_back(i);
 	}
 	catch (RpcError& e) {
@@ -332,7 +293,6 @@ void ping(const vector<string>& args, const options& opts)
     }
 
     for (auto version: versions) {
-	auto chan = connectChannel(addr.get());
 	auto cl = make_shared<Client>(program, version);
 	try {
 	    chan->call(cl.get(), 0, [](XdrSink*){}, [](XdrSource*){});

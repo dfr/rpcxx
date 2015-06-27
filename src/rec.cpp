@@ -71,7 +71,7 @@ RecordWriter::startNewFragment()
 {
     next_ = buf_.data();
     limit_ = next_ + buf_.size();
-    uint32_t rec = 0;
+    const uint32_t rec = 0;
     xdr(rec, this);
 }
 

@@ -23,9 +23,9 @@ struct opaque_auth {
 };
 
 template <typename XDR>
-void xdr(opaque_auth& v, XDR* xdrs)
+void xdr(RefType<opaque_auth, XDR> v, XDR* xdrs)
 {
-    xdr(reinterpret_cast<uint32_t&>(v.flavor), xdrs);
+    xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.flavor), xdrs);
     xdr(v.auth_body, xdrs);
 }
 
@@ -93,7 +93,7 @@ struct call_body {
 };
 
 template <typename XDR>
-void xdr(call_body& v, XDR* xdrs)
+void xdr(RefType<call_body, XDR> v, XDR* xdrs)
 {
     xdr(v.rpcvers, xdrs);
     xdr(v.prog, xdrs);
@@ -109,7 +109,7 @@ struct version_mismatch {
 };
 
 template <typename XDR>
-void xdr(version_mismatch& v, XDR* xdrs)
+void xdr(RefType<version_mismatch, XDR> v, XDR* xdrs)
 {
     xdr(v.low, xdrs);
     xdr(v.high, xdrs);
@@ -122,10 +122,10 @@ struct accepted_reply {
 };
 
 template <typename XDR>
-void xdr(accepted_reply& v, XDR* xdrs)
+void xdr(RefType<accepted_reply, XDR> v, XDR* xdrs)
 {
     xdr(v.verf, xdrs);
-    xdr(reinterpret_cast<uint32_t&>(v.stat), xdrs);
+    xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.stat), xdrs);
     if (v.stat == PROG_MISMATCH)
 	xdr(v.mismatch_info, xdrs);
 }
@@ -139,15 +139,15 @@ struct rejected_reply {
 };
 
 template <typename XDR>
-void xdr(rejected_reply& v, XDR* xdrs)
+void xdr(RefType<rejected_reply, XDR> v, XDR* xdrs)
 {
-    xdr(reinterpret_cast<uint32_t&>(v.stat), xdrs);
+    xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.stat), xdrs);
     switch (v.stat) {
     case RPC_MISMATCH:
 	xdr(v.rpc_mismatch, xdrs);
 	break;
     case AUTH_ERROR:
-	xdr(reinterpret_cast<uint32_t&>(v.auth_error), xdrs);
+	xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.auth_error), xdrs);
 	break;
     default:
 	break;
@@ -236,14 +236,26 @@ struct reply_body {
 	return *reinterpret_cast<accepted_reply*>(&storage);
     }
 
+    const accepted_reply& areply() const
+    {
+	assert(hasValue && stat == MSG_ACCEPTED);
+	return *reinterpret_cast<const accepted_reply*>(&storage);
+    }
+
     rejected_reply& rreply()
     {
 	assert(hasValue && stat == MSG_DENIED);
 	return *reinterpret_cast<rejected_reply*>(&storage);
     }
+
+    const rejected_reply& rreply() const
+    {
+	assert(hasValue && stat == MSG_DENIED);
+	return *reinterpret_cast<const rejected_reply*>(&storage);
+    }
 };
 
-static void xdr(reply_body& v, XdrSink* xdrs)
+static void xdr(const reply_body& v, XdrSink* xdrs)
 {
     xdr(v.stat, xdrs);
     switch (v.stat) {
@@ -383,7 +395,7 @@ struct rpc_msg {
     }
 };
 
-static void xdr(rpc_msg& v, XdrSink* xdrs)
+static void xdr(const rpc_msg& v, XdrSink* xdrs)
 {
     xdr(v.xid, xdrs);
     xdr(v.mtype, xdrs);

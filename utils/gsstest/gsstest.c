@@ -6,7 +6,7 @@
 //#define GSSKRB_APPLE_DEPRECATED(x)
 //#include <gssapi/gssapi.h>
 #include <GSS/GSS.h>
-#include <CoreFoundation/CoreFoundation.h>
+//#include <CoreFoundation/CoreFoundation.h>
 
 void
 usage()
@@ -16,7 +16,7 @@ usage()
     exit(1);
 }
 
-#if 0
+#if 1
 
 void
 report_error(gss_OID mech, OM_uint32 maj, OM_uint32 min)

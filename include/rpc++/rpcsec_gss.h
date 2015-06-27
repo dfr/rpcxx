@@ -34,12 +34,12 @@ struct rpc_gss_cred_vers_1_t
 };
 
 template <typename XDR>
-void xdr(rpc_gss_cred_vers_1_t& v, XDR* xdrs)
+void xdr(RefType<rpc_gss_cred_vers_1_t, XDR> v, XDR* xdrs)
 {
     xdr(v.gss_ver, xdrs);
-    xdr(reinterpret_cast<uint32_t&>(v.gss_proc), xdrs);
+    xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.gss_proc), xdrs);
     xdr(v.seq_num, xdrs);
-    xdr(reinterpret_cast<uint32_t&>(v.service), xdrs);
+    xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.service), xdrs);
     xdr(v.handle, xdrs);
 }
 
@@ -52,7 +52,7 @@ struct rpc_gss_init_res {
 };
 
 template <typename XDR>
-void xdr(rpc_gss_init_res& v, XDR* xdrs)
+void xdr(RefType<rpc_gss_init_res, XDR>& v, XDR* xdrs)
 {
     xdr(v.handle, xdrs);
     xdr(v.gss_major, xdrs);

@@ -6,7 +6,9 @@ cc_library(
             "include/rpc++/*.h"]),
     deps = ["//third_party/glog:glog"],
     includes = ["include"],
-    visibility = ["//visibility:public"]
+    visibility = ["//visibility:public"],
+    linkopts = ["-framework GSS", "-framework CoreFoundation"],
+    linkstatic = 1
 )
 
 cc_test(
@@ -18,7 +20,7 @@ cc_test(
         ":rpcxx",
         "//third_party/glog:glog",
         "//third_party/gtest:gtest_main"],
-    #linkopts = ["-lgssapi_krb5"]
+    linkstatic = 1,
     linkopts = ["-framework GSS"],
     data = ["test.keytab"]
 )

@@ -37,7 +37,6 @@ protected:
 	uint32_t xid, uint32_t proc,
 	XdrSink* xdrs);
 
-private:
     uint32_t program_;
     uint32_t version_;
 };

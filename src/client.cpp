@@ -65,7 +65,7 @@ struct authsys_parms
 };
 
 template <typename XDR>
-static void xdr(authsys_parms& v, XDR* xdrs)
+static void xdr(RefType<authsys_parms, XDR> v, XDR* xdrs)
 {
     xdr(v.stamp, xdrs);
     xdr(v.machinename, xdrs);

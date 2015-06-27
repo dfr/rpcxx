@@ -17,5 +17,6 @@ cc_test(
     copts = ["-std=c++14"],
     srcs = glob(["test/*.cpp"]),
     deps = [":genlib",
-            "//third_party/gtest:gtest_main"]
+            "//third_party/gtest:gtest_main"],
+    linkstatic = 1
 )

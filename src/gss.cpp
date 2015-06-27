@@ -148,32 +148,23 @@ GssClient::processCall(
     uint32_t xid, uint32_t proc, XdrSink* xdrs,
     std::function<void(XdrSink*)> xargs)
 {
-    uint8_t credbuf[400];
-    uint32_t credlen;
     int seq = 0;
 
     if (state_.gss_proc == RPCSEC_GSS_DATA) {
 	seq = ++state_.seq_num;
     }
 
-    {
-	XdrMemory xdrcred(credbuf, sizeof(credbuf));
-	xdr(state_, static_cast<XdrSink*>(&xdrcred));
-	credlen = xdrcred.pos();
-    }
-
     // More than enough space for the call and cred
     uint8_t callbuf[512];
+    uint32_t credlen = XdrSizeof(state_);
     uint32_t calllen;
 
-    {
-	XdrMemory xdrcall(callbuf, sizeof(callbuf));
-	encodeCall(xid, proc, &xdrcall);
-	xdrcall.putWord(RPCSEC_GSS);
-	xdrcall.putWord(credlen);
-	xdrcall.putBytes(credbuf, credlen);
-	calllen = xdrcall.pos();
-    }
+    XdrMemory xdrcall(callbuf, sizeof(callbuf));
+    encodeCall(xid, proc, &xdrcall);
+    xdrcall.putWord(RPCSEC_GSS);
+    xdrcall.putWord(credlen);
+    xdr(state_, &xdrcall);
+    calllen = xdrcall.pos();
 
     xdrs->putBytes(callbuf, calllen);
     if (state_.gss_proc == RPCSEC_GSS_DATA) {
