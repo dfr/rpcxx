@@ -117,7 +117,13 @@ public:
     }
 };
 
-inline void xdr(uint32_t v, XdrSink* xdrs)
+/// Expands to either T& or const T& depending on whether XDR is
+/// XdrSource or XdrSink
+template <typename T, typename XDR>
+using RefType = typename std::conditional<
+    std::is_convertible<XDR*, XdrSink*>::value, const T&, T&>::type;
+
+inline void xdr(const uint32_t v, XdrSink* xdrs)
 {
     xdrs->putWord(v);
 }
@@ -127,7 +133,7 @@ inline void xdr(uint32_t& v, XdrSource* xdrs)
     xdrs->getWord(v);
 }
 
-inline void xdr(uint64_t v, XdrSink* xdrs)
+inline void xdr(const uint64_t v, XdrSink* xdrs)
 {
     xdrs->putWord(static_cast<uint32_t>(v >> 32));
     xdrs->putWord(static_cast<uint32_t>(v));
@@ -219,59 +225,59 @@ inline void xdr(bounded_string<N>& v, XdrSource* xdrs)
     xdrs->getBytes(reinterpret_cast<uint8_t*>(&v[0]), v.size());
 }
 
-inline void xdr(int v, XdrSink* xdrs)
+inline void xdr(const int v, XdrSink* xdrs)
 {
-    xdr(uint32_t(v), xdrs);
+    xdr(reinterpret_cast<const uint32_t&>(v), xdrs);
 }
 
 inline void xdr(int& v, XdrSource* xdrs)
 {
-    xdr(*reinterpret_cast<uint32_t*>(&v), xdrs);
+    xdr(reinterpret_cast<uint32_t&>(v), xdrs);
 }
 
-inline void xdr(long v, XdrSink* xdrs)
+inline void xdr(const long v, XdrSink* xdrs)
 {
-    xdr(uint64_t(v), xdrs);
+    xdr(reinterpret_cast<const uint64_t&>(v), xdrs);
 }
 
 inline void xdr(long& v, XdrSource* xdrs)
 {
-    xdr(*reinterpret_cast<uint64_t*>(&v), xdrs);
+    xdr(reinterpret_cast<uint64_t&>(v), xdrs);
 }
 
-inline void xdr(unsigned long v, XdrSink* xdrs)
+inline void xdr(const unsigned long v, XdrSink* xdrs)
 {
-    xdr(uint64_t(v), xdrs);
+    xdr(reinterpret_cast<const uint64_t&>(v), xdrs);
 }
 
 inline void xdr(unsigned long& v, XdrSource* xdrs)
 {
-    xdr(*reinterpret_cast<uint64_t*>(&v), xdrs);
+    xdr(reinterpret_cast<uint64_t&>(v), xdrs);
 }
 
-inline void xdr(float v, XdrSink* xdrs)
+inline void xdr(const float v, XdrSink* xdrs)
 {
-    xdr(*reinterpret_cast<uint32_t*>(&v), xdrs);
+    xdr(reinterpret_cast<const uint32_t&>(v), xdrs);
 }
 
 inline void xdr(float& v, XdrSource* xdrs)
 {
-    xdr(*reinterpret_cast<uint32_t*>(&v), xdrs);
+    xdr(reinterpret_cast<uint32_t&>(v), xdrs);
 }
 
-inline void xdr(double v, XdrSink* xdrs)
+inline void xdr(const double v, XdrSink* xdrs)
 {
-    xdr(*reinterpret_cast<uint64_t*>(&v), xdrs);
+    xdr(reinterpret_cast<const uint64_t&>(v), xdrs);
 }
 
 inline void xdr(double& v, XdrSource* xdrs)
 {
-    xdr(*reinterpret_cast<uint64_t*>(&v), xdrs);
+    xdr(reinterpret_cast<uint64_t&>(v), xdrs);
 }
 
-inline void xdr(bool v, XdrSink* xdrs)
+inline void xdr(const bool v, XdrSink* xdrs)
 {
-    uint32_t t = v;
+    const uint32_t t = v;
     xdr(t, xdrs);
 }
 
@@ -338,7 +344,7 @@ inline void xdr(bounded_vector<T,N>& v, XdrSource* xdrs)
 }
 
 template <typename T>
-    inline void xdr(const std::unique_ptr<T>& v, XdrSink* xdrs)
+inline void xdr(const std::unique_ptr<T>& v, XdrSink* xdrs)
 {
     if (v) {
 	xdr(true, xdrs);
@@ -350,7 +356,7 @@ template <typename T>
 }
 
 template <typename T>
-    inline void xdr(std::unique_ptr<T>& v, XdrSource* xdrs)
+inline void xdr(std::unique_ptr<T>& v, XdrSource* xdrs)
 {
     bool notNull;
     xdr(notNull, xdrs);
@@ -450,12 +456,6 @@ size_t XdrSizeof(const T& v)
     xdr(v, &xdrs);
     return xdrs.size();
 }
-
-/// Expands to either T& or const T& depending on whether XDR is
-/// XdrSource or XdrSink
-template <typename T, typename XDR>
-using RefType = typename std::conditional<
-    std::is_convertible<XDR*, XdrSink*>::value, const T&, T&>::type;
 
 }
 
