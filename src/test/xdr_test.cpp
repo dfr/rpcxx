@@ -15,36 +15,36 @@ public:
     template <typename T>
     void compare(const T& a, const T& b)
     {
-	EXPECT_EQ(a, b);
+        EXPECT_EQ(a, b);
     }
 
     template <typename T>
     void compare(const unique_ptr<T>& a, const unique_ptr<T>& b)
     {
-	if (a.get() == nullptr) {
-	    EXPECT_EQ(a.get(), b.get());
-	}
-	else {
-	    EXPECT_EQ(*a.get(), *b.get());
-	}
+        if (a.get() == nullptr) {
+            EXPECT_EQ(a.get(), b.get());
+        }
+        else {
+            EXPECT_EQ(*a.get(), *b.get());
+        }
     }
 
     template <typename T, size_t N>
     void test(const T& a, array<uint8_t, N> x)
     {
-	uint8_t buf[512];
-	fill_n(buf, sizeof buf, 99);
-	auto xdrmem = make_unique<XdrMemory>(buf, sizeof buf);
-	xdr(a, static_cast<XdrSink*>(xdrmem.get()));
-	EXPECT_EQ(xdrmem->writePos(), N);
+        uint8_t buf[512];
+        fill_n(buf, sizeof buf, 99);
+        auto xdrmem = make_unique<XdrMemory>(buf, sizeof buf);
+        xdr(a, static_cast<XdrSink*>(xdrmem.get()));
+        EXPECT_EQ(xdrmem->writePos(), N);
 
-	xdrmem->rewind();
-	T b;
-	xdr(b, static_cast<XdrSource*>(xdrmem.get()));
-	compare(a, b);
-	EXPECT_EQ(xdrmem->readPos(), N);
-	for (auto i = 0; i < N; i++)
-	    EXPECT_EQ(buf[i], x[i]);
+        xdrmem->rewind();
+        T b;
+        xdr(b, static_cast<XdrSource*>(xdrmem.get()));
+        compare(a, b);
+        EXPECT_EQ(xdrmem->readPos(), N);
+        for (auto i = 0; i < N; i++)
+            EXPECT_EQ(buf[i], x[i]);
     }
 };
 
@@ -84,9 +84,9 @@ TEST_F(XdrTest, ByteArrays)
 TEST_F(XdrTest, PODArrays)
 {
     test<array<A, 2>, 16>({A{1, 2}, A{3, 4}},
-	{0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4});
+        {0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4});
     test<vector<A>, 20>({A{1, 2}, A{3, 4}},
-	{0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4});
+        {0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4});
 }
 
 TEST_F(XdrTest, Pointers)

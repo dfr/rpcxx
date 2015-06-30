@@ -24,18 +24,18 @@ public:
     
     virtual void validateAuth(Channel* chan) {}
     virtual uint32_t processCall(
-	uint32_t xid, uint32_t proc, XdrSink* xdrs,
-	std::function<void(XdrSink*)> xargs);
+        uint32_t xid, uint32_t proc, XdrSink* xdrs,
+        std::function<void(XdrSink*)> xargs);
     virtual bool processReply(
-	uint32_t seq,
-	accepted_reply& areply,
-	XdrSource* xdrs, std::function<void(XdrSource*)> xresults);
+        uint32_t seq,
+        accepted_reply& areply,
+        XdrSource* xdrs, std::function<void(XdrSource*)> xresults);
     virtual bool authError(auth_stat stat);
 
 protected:
     void encodeCall(
-	uint32_t xid, uint32_t proc,
-	XdrSink* xdrs);
+        uint32_t xid, uint32_t proc,
+        XdrSink* xdrs);
 
     uint32_t program_;
     uint32_t version_;
@@ -48,8 +48,8 @@ public:
     SysClient(uint32_t program, uint32_t version);
 
     uint32_t processCall(
-	uint32_t xid, uint32_t proc, XdrSink* xdrs,
-	std::function<void(XdrSink*)> xargs) override;
+        uint32_t xid, uint32_t proc, XdrSink* xdrs,
+        std::function<void(XdrSink*)> xargs) override;
 
 private:
     std::vector<uint8_t> cred_;

@@ -29,11 +29,11 @@ constexpr int RPCB_PORT = 111;
  * every system.
  */
 struct rpcb {
-    uint32_t r_prog;		/* program number */
-    uint32_t r_vers;		/* version number */
-    std::string r_netid;	/* network id */
-    std::string r_addr;		/* universal address */
-    std::string r_owner;	/* owner of this service */
+    uint32_t r_prog;            /* program number */
+    uint32_t r_vers;            /* version number */
+    std::string r_netid;        /* network id */
+    std::string r_addr;         /* universal address */
+    std::string r_owner;        /* owner of this service */
 };
 
 template <typename XDR>
@@ -58,16 +58,16 @@ void xdr(RefType<rp__list, XDR> v, XDR* xdrs)
     xdr(v.rpcb_next, xdrs);
 }
 
-typedef std::unique_ptr<rp__list> rpcblist_ptr;	/* results of RPCBPROC_DUMP */
+typedef std::unique_ptr<rp__list> rpcblist_ptr; /* results of RPCBPROC_DUMP */
 
 /*
  * Arguments of remote calls
  */
 struct rpcb_rmtcallargs {
-    uint prog;			/* program number */
-    uint vers;			/* version number */
-    uint proc;			/* procedure number */
-    std::vector<uint8_t> args;	/* argument */
+    uint prog;                  /* program number */
+    uint vers;                  /* version number */
+    uint proc;                  /* procedure number */
+    std::vector<uint8_t> args;  /* argument */
 };
 
 template <typename XDR>
@@ -83,7 +83,7 @@ void xdr(RefType<rpcb_rmtcallargs, XDR> v, XDR* xdrs)
  * Results of the remote call
  */
 struct rpcb_rmtcallres {
-    std::string addr;		/* remote universal address */
+    std::string addr;           /* remote universal address */
     std::vector<uint8_t> results; /* result */
 };
 
@@ -250,86 +250,86 @@ class RpcBind
 {
 public:
     RpcBind(std::shared_ptr<Channel> channel)
-	: channel_(channel),
-	  client_(std::make_shared<Client>(RPCBPROG, RPCBVERS))
+        : channel_(channel),
+          client_(std::make_shared<Client>(RPCBPROG, RPCBVERS))
     {
     }
 
     void null()
     {
-	channel_->call(client_.get(), 0, [](XdrSink*) {}, [](XdrSource*) {});
+        channel_->call(client_.get(), 0, [](XdrSink*) {}, [](XdrSource*) {});
     }
 
     bool set(const rpcb& args)
     {
-	bool res;
-	channel_->call(client_.get(), 1,
-		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return res;
+        bool res;
+        channel_->call(client_.get(), 1,
+                      [&](XdrSink* xdrs) { xdr(args, xdrs); },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return res;
     }
 
     bool unset(const rpcb& args)
     {
-	bool res;
-	channel_->call(client_.get(), 2,
-		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return res;
+        bool res;
+        channel_->call(client_.get(), 2,
+                      [&](XdrSink* xdrs) { xdr(args, xdrs); },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return res;
     }
 
     std::string getaddr(const rpcb& args)
     {
-	std::string res;
-	channel_->call(client_.get(), 3,
-		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return res;
+        std::string res;
+        channel_->call(client_.get(), 3,
+                      [&](XdrSink* xdrs) { xdr(args, xdrs); },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return res;
     }
 
     rpcblist_ptr dump()
     {
-	rpcblist_ptr res;
-	channel_->call(client_.get(), 4,
-		      [&](XdrSink* xdrs) { },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return std::move(res);
+        rpcblist_ptr res;
+        channel_->call(client_.get(), 4,
+                      [&](XdrSink* xdrs) { },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return std::move(res);
     }
 
     rpcb_rmtcallres callit(const rpcb_rmtcallargs& args)
     {
-	rpcb_rmtcallres res;
-	channel_->call(client_.get(), 5,
-		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return std::move(res);
+        rpcb_rmtcallres res;
+        channel_->call(client_.get(), 5,
+                      [&](XdrSink* xdrs) { xdr(args, xdrs); },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return std::move(res);
     }
 
     uint32_t gettime()
     {
-	uint32_t res;
-	channel_->call(client_.get(), 6,
-		      [&](XdrSink* xdrs) { },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return res;
+        uint32_t res;
+        channel_->call(client_.get(), 6,
+                      [&](XdrSink* xdrs) { },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return res;
     }
 
     netbuf uaddr2taddr(const std::string& args)
     {
-	netbuf res;
-	channel_->call(client_.get(), 7,
-		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return std::move(res);
+        netbuf res;
+        channel_->call(client_.get(), 7,
+                      [&](XdrSink* xdrs) { xdr(args, xdrs); },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return std::move(res);
     }
 
     std::string taddr2uaddr(const netbuf& args)
     {
-	std::string res;
-	channel_->call(client_.get(), 7,
-		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return std::move(res);
+        std::string res;
+        channel_->call(client_.get(), 7,
+                      [&](XdrSink* xdrs) { xdr(args, xdrs); },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return std::move(res);
     }
 
 private:

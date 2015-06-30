@@ -18,8 +18,8 @@ class hash<std::pair<uint32_t, uint32_t>>
 public:
     size_t operator()(const std::pair<uint32_t, uint32_t>& v) const
     {
-	std::hash<uint32_t> h;
-	return h(v.first) ^ h(v.second);
+        std::hash<uint32_t> h;
+        return h(v.first) ^ h(v.second);
     }
 };
 
@@ -41,7 +41,7 @@ class ServiceRegistry
 {
 public:
     void add(
-	uint32_t prog, uint32_t vers, ServiceEntry&& entry);
+        uint32_t prog, uint32_t vers, ServiceEntry&& entry);
 
     void remove(uint32_t prog, uint32_t vers);
     
@@ -66,8 +66,8 @@ public:
 
     void stop()
     {
-	std::lock_guard<std::mutex> lock(mutex_);
-	stopping_ = true;
+        std::lock_guard<std::mutex> lock(mutex_);
+        stopping_ = true;
     }
 
 private:
@@ -81,7 +81,7 @@ class Connection
 {
 public:
     Connection(
-	int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg);
+        int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg);
 
     virtual ~Connection();
 
@@ -103,7 +103,7 @@ class DatagramConnection: public Connection
 {
 public:
     DatagramConnection(
-	int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg);
+        int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg);
 
     // Connection overrides
     bool onReadable(ConnectionRegistry* connreg) override;
@@ -120,7 +120,7 @@ class StreamConnection: public Connection
 {
 public:
     StreamConnection(
-	int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg);
+        int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg);
 
     // Connection overrides
     bool onReadable(ConnectionRegistry* connreg) override;
@@ -134,7 +134,7 @@ class ListenConnection: public Connection
 {
 public:
     ListenConnection(
-	int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg);
+        int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg);
 
     // Connection overrides
     bool onReadable(ConnectionRegistry* connreg) override;

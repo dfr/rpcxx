@@ -115,10 +115,10 @@ public:
 
     /// Make a remote procedure call
     virtual void call(
-	Client* client, uint32_t proc,
-	std::function<void(XdrSink*)> xargs,
-	std::function<void(XdrSource*)> xresults,
-	std::chrono::system_clock::duration timeout = std::chrono::seconds(30));
+        Client* client, uint32_t proc,
+        std::function<void(XdrSink*)> xargs,
+        std::function<void(XdrSource*)> xresults,
+        std::chrono::system_clock::duration timeout = std::chrono::seconds(30));
 
     /// Return an XDR to encode an outgoing message. When the message
     /// is complete, call endCall to send it to the remote endpoint.
@@ -132,7 +132,7 @@ public:
     /// Return an XDR to decode an incoming message. When the message
     /// is decoded, call endReply.
     virtual std::unique_ptr<XdrSource> beginReply(
-	std::chrono::system_clock::duration timeout) = 0;
+        std::chrono::system_clock::duration timeout) = 0;
 
     /// Signal to the derived class that we have finished processing
     /// the incoming message. If the message is not fully decoded, set
@@ -145,22 +145,22 @@ public:
 
 protected:
     struct Transaction {
-	Transaction()
-	    : cv(new std::condition_variable)
-	{
-	}
+        Transaction()
+            : cv(new std::condition_variable)
+        {
+        }
 
-	Transaction(Transaction&& other)
-	    : cv(std::move(other.cv)),
-	      reply(std::move(other.reply))
-	{
-	}
+        Transaction(Transaction&& other)
+            : cv(std::move(other.cv)),
+              reply(std::move(other.reply))
+        {
+        }
 
-	uint32_t seq;
-	bool sleeping = false;
-	std::unique_ptr<std::condition_variable> cv; // signalled when ready
-	rpc_msg reply;
-	std::unique_ptr<XdrSource> body;
+        uint32_t seq;
+        bool sleeping = false;
+        std::unique_ptr<std::condition_variable> cv; // signalled when ready
+        rpc_msg reply;
+        std::unique_ptr<XdrSource> body;
     };
 
     uint32_t xid_;
@@ -169,7 +169,7 @@ protected:
     // The mutex serialises access to running_, pending_ and all
     // transactions contained in pending_
     std::mutex mutex_;
-    bool running_ = false;	// true if a thread is reading
+    bool running_ = false;      // true if a thread is reading
     std::unordered_map<uint32_t, Transaction> pending_; // in-flight calls
 };
 
@@ -184,7 +184,7 @@ public:
     std::unique_ptr<XdrSink> beginCall() override;
     void endCall(std::unique_ptr<XdrSink>&& msg) override;
     std::unique_ptr<XdrSource> beginReply(
-	std::chrono::system_clock::duration timeout) override;
+        std::chrono::system_clock::duration timeout) override;
     void endReply(std::unique_ptr<XdrSource>&& msg, bool skip) override;
     void close() override;
 
@@ -231,7 +231,7 @@ public:
     std::unique_ptr<XdrSink> beginCall() override;
     void endCall(std::unique_ptr<XdrSink>&& msg) override;
     std::unique_ptr<XdrSource> beginReply(
-	std::chrono::system_clock::duration timeout) override;
+        std::chrono::system_clock::duration timeout) override;
     void endReply(std::unique_ptr<XdrSource>&& msg, bool skip) override;
 
 private:
@@ -251,7 +251,7 @@ public:
     std::unique_ptr<XdrSink> beginCall() override;
     void endCall(std::unique_ptr<XdrSink>&& msg) override;
     std::unique_ptr<XdrSource> beginReply(
-	std::chrono::system_clock::duration timeout) override;
+        std::chrono::system_clock::duration timeout) override;
     void endReply(std::unique_ptr<XdrSource>&& msg, bool skip) override;
 
 private:

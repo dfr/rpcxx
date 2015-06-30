@@ -16,12 +16,12 @@ class RpcError: public std::runtime_error
 {
 public:
     RpcError(const std::string& what)
-	: std::runtime_error(what)
+        : std::runtime_error(what)
     {
     }
 
     RpcError(const char* what)
-	: std::runtime_error(what)
+        : std::runtime_error(what)
     {
     }
 };

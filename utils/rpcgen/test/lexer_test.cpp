@@ -44,12 +44,12 @@ TEST_F(LexerTest, Identifiers)
     Lexer lex(str, cerr);
     auto i = begin(values);
     for (;;) {
-	auto tok = lex.nextToken();
-	if (tok.type() == Token::END_OF_FILE)
-	    break;
-	EXPECT_EQ(Token::IDENTIFIER, tok.type());
-	EXPECT_EQ(*i, tok.svalue());
-	++i;
+        auto tok = lex.nextToken();
+        if (tok.type() == Token::END_OF_FILE)
+            break;
+        EXPECT_EQ(Token::IDENTIFIER, tok.type());
+        EXPECT_EQ(*i, tok.svalue());
+        ++i;
     }
     EXPECT_EQ(end(values), i);
 }
@@ -62,12 +62,12 @@ TEST_F(LexerTest, Integer)
     Lexer lex(str, cerr);
     auto i = begin(values);;
     for (;;) {
-	auto tok = lex.nextToken();
-	if (tok.type() == Token::END_OF_FILE)
-	    break;
-	EXPECT_EQ(Token::INTEGER, tok.type());
-	EXPECT_EQ(*i, tok.ivalue());
-	++i;
+        auto tok = lex.nextToken();
+        if (tok.type() == Token::END_OF_FILE)
+            break;
+        EXPECT_EQ(Token::INTEGER, tok.type());
+        EXPECT_EQ(*i, tok.ivalue());
+        ++i;
     }
     EXPECT_EQ(end(values), i);
 }

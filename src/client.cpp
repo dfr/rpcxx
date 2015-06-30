@@ -47,20 +47,20 @@ Client::encodeCall(
     // Derived classes should call this before encoding cred and verf
     XdrWord* p = xdrs->writeInline<XdrWord>(6 * sizeof(XdrWord));
     if (p) {
-	*p++ = xid;
-	*p++ = CALL;
-	*p++ = 2;
-	*p++ = program_;
-	*p++ = version_;
-	*p++ = proc;
+        *p++ = xid;
+        *p++ = CALL;
+        *p++ = 2;
+        *p++ = program_;
+        *p++ = version_;
+        *p++ = proc;
     }
     else {
-	xdrs->putWord(xid);
-	xdrs->putWord(CALL);
-	xdrs->putWord(2);
-	xdrs->putWord(program_);
-	xdrs->putWord(version_);
-	xdrs->putWord(proc);
+        xdrs->putWord(xid);
+        xdrs->putWord(CALL);
+        xdrs->putWord(2);
+        xdrs->putWord(program_);
+        xdrs->putWord(version_);
+        xdrs->putWord(proc);
     }
 }
 

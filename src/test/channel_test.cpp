@@ -15,31 +15,31 @@ class ChannelTest: public ::testing::Test
 {
 public:
     ChannelTest()
-	: client(make_shared<Client>(1234, 1))
+        : client(make_shared<Client>(1234, 1))
     {
     }
 
     /// Call a simple echo service with the given procedure number
     void simpleCall(
-	shared_ptr<Channel> chan, shared_ptr<Client> client, uint32_t proc)
+        shared_ptr<Channel> chan, shared_ptr<Client> client, uint32_t proc)
     {
-	chan->call(
-	    client.get(), proc,
-	    [](XdrSink* xdrs) {
-		uint32_t v = 123; xdr(v, xdrs); },
-	    [](XdrSource* xdrs) {
-		uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
+        chan->call(
+            client.get(), proc,
+            [](XdrSink* xdrs) {
+                uint32_t v = 123; xdr(v, xdrs); },
+            [](XdrSource* xdrs) {
+                uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
     }
 
     thread callMany(
-	shared_ptr<Channel> chan, uint32_t proc, int iterations)
+        shared_ptr<Channel> chan, uint32_t proc, int iterations)
     {
-	return thread(
-	    [=]() {
-		for (int i = 0; i < iterations; i++) {
-		    simpleCall(chan, client, 1);
-		}
-	    });
+        return thread(
+            [=]() {
+                for (int i = 0; i < iterations; i++) {
+                    simpleCall(chan, client, 1);
+                }
+            });
     }
 
     shared_ptr<Client> client;
@@ -57,48 +57,48 @@ public:
 
     void start()
     {
-	thread_ = thread(
-	    [=]() {
-		auto buf = std::make_unique<XdrMemory>(1500);
+        thread_ = thread(
+            [=]() {
+                auto buf = std::make_unique<XdrMemory>(1500);
 
-		bool stopping = false;
-		while (!stopping) {
-		    auto dec = beginCall();
-		    rpc_msg call_msg;
-		    uint32_t val;
+                bool stopping = false;
+                while (!stopping) {
+                    auto dec = beginCall();
+                    rpc_msg call_msg;
+                    uint32_t val;
 
-		    xdr(call_msg, dec);
-		    auto cbody = call_msg.cbody();
-		    if (cbody.proc == 1)
-			xdr(val, dec);
-		    endCall();
+                    xdr(call_msg, dec);
+                    auto cbody = call_msg.cbody();
+                    if (cbody.proc == 1)
+                        xdr(val, dec);
+                    endCall();
 
-		    accepted_reply ar;
-		    ar.verf = { AUTH_NONE, {} };
-		    ar.stat = SUCCESS;
-		    rpc_msg reply_msg(call_msg.xid, reply_body(std::move(ar)));
+                    accepted_reply ar;
+                    ar.verf = { AUTH_NONE, {} };
+                    ar.stat = SUCCESS;
+                    rpc_msg reply_msg(call_msg.xid, reply_body(std::move(ar)));
 
-		    auto enc = beginReply();
-		    xdr(reply_msg, enc);
-		    if (cbody.proc == 1)
-			xdr(val, enc);
-		    endReply();
+                    auto enc = beginReply();
+                    xdr(reply_msg, enc);
+                    if (cbody.proc == 1)
+                        xdr(val, enc);
+                    endReply();
 
-		    if (cbody.proc == 2)
-			stopping = true;
-		}
-	    });
+                    if (cbody.proc == 2)
+                        stopping = true;
+                }
+            });
     }
 
     ~SimpleServer()
     {
-	thread_.join();
+        thread_.join();
     }
 
     void stop(shared_ptr<Channel> chan, shared_ptr<Client> client)
     { 
-	chan->call(
-	    client.get(), 2, [](XdrSink* xdrs) {}, [](XdrSource* xdrs) {});
+        chan->call(
+            client.get(), 2, [](XdrSink* xdrs) {}, [](XdrSource* xdrs) {});
     }
 
     virtual XdrSource* beginCall() = 0;
@@ -113,25 +113,25 @@ class SimpleDatagramServer: public SimpleServer
 {
 public:
     SimpleDatagramServer(int sock)
-	: sock_(sock),
-	  buf_(make_unique<XdrMemory>(1500))
+        : sock_(sock),
+          buf_(make_unique<XdrMemory>(1500))
     {
-	start();
+        start();
     }
 
     ~SimpleDatagramServer()
     {
-	::close(sock_);
+        ::close(sock_);
     }
 
     XdrSource* beginCall() override
     {
-	buf_->rewind();
-	addrlen_ = addr_.sun_len = sizeof(addr_);
-	auto bytes = ::recvfrom(
-	    sock_, buf_->buf(), buf_->bufferSize(), 0,
-	    reinterpret_cast<sockaddr*>(&addr_), &addrlen_);
-	return buf_.get();
+        buf_->rewind();
+        addrlen_ = addr_.sun_len = sizeof(addr_);
+        auto bytes = ::recvfrom(
+            sock_, buf_->buf(), buf_->bufferSize(), 0,
+            reinterpret_cast<sockaddr*>(&addr_), &addrlen_);
+        return buf_.get();
     }
 
     void endCall() override
@@ -140,16 +140,16 @@ public:
 
     XdrSink* beginReply() override
     {
-	buf_->rewind();
-	return buf_.get();
+        buf_->rewind();
+        return buf_.get();
     }
 
     void endReply() override
     {
-	auto bytes = ::sendto(
-	    sock_, buf_->buf(), buf_->writePos(), 0,
-	    reinterpret_cast<const sockaddr*>(&addr_), addrlen_);
-	ASSERT_EQ(buf_->writePos(), bytes);
+        auto bytes = ::sendto(
+            sock_, buf_->buf(), buf_->writePos(), 0,
+            reinterpret_cast<const sockaddr*>(&addr_), addrlen_);
+        ASSERT_EQ(buf_->writePos(), bytes);
     }
 
     int sock_;
@@ -162,54 +162,54 @@ class SimpleStreamServer: public SimpleServer
 {
 public:
     SimpleStreamServer(int sock)
-	: sock_(sock)
+        : sock_(sock)
     {
-	dec_ = std::make_unique<RecordReader>(
-	    1500,
-	    [=](void* buf, size_t len) {
-		return ::read(sock_, buf, len);
-	    });
-	enc_ = std::make_unique<RecordWriter>(
-	    1500,
-	    [=](const void* buf, size_t len) {
-		const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
-		size_t n = len;
-		while (n > 0) {
-		    auto bytes = ::write(sock_, p, len);
-		    if (bytes < 0)
-			throw std::system_error(
-			    errno, std::system_category());
-		    p += bytes;
-		    n -= bytes;
-		}
-		return len;
-	    });
-	start();
+        dec_ = std::make_unique<RecordReader>(
+            1500,
+            [=](void* buf, size_t len) {
+                return ::read(sock_, buf, len);
+            });
+        enc_ = std::make_unique<RecordWriter>(
+            1500,
+            [=](const void* buf, size_t len) {
+                const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
+                size_t n = len;
+                while (n > 0) {
+                    auto bytes = ::write(sock_, p, len);
+                    if (bytes < 0)
+                        throw std::system_error(
+                            errno, std::system_category());
+                    p += bytes;
+                    n -= bytes;
+                }
+                return len;
+            });
+        start();
     }
 
     ~SimpleStreamServer()
     {
-	::close(sock_);
+        ::close(sock_);
     }
 
     XdrSource* beginCall() override
     {
-	return dec_.get();
+        return dec_.get();
     }
 
     void endCall() override
     {
-	dec_->endRecord();
+        dec_->endRecord();
     }
 
     XdrSink* beginReply() override
     {
-	return enc_.get();
+        return enc_.get();
     }
 
     void endReply() override
     {
-	enc_->pushRecord();
+        enc_->pushRecord();
     }
 
     int sock_;
@@ -223,18 +223,18 @@ class TimeoutChannel: public Channel
 public:
     unique_ptr<XdrSink> beginCall() override
     {
-	return unique_ptr<XdrSink>(new XdrMemory(buf_, sizeof(buf_)));
+        return unique_ptr<XdrSink>(new XdrMemory(buf_, sizeof(buf_)));
     }
 
     void endCall(unique_ptr<XdrSink>&& msg) override
     {
-	msg.reset(nullptr);
+        msg.reset(nullptr);
     }
 
     unique_ptr<XdrSource> beginReply(
-	std::chrono::system_clock::duration timeout) override
+        std::chrono::system_clock::duration timeout) override
     {
-	return nullptr;
+        return nullptr;
     }
 
     void endReply(unique_ptr<XdrSource>&& msg, bool skip)
@@ -254,11 +254,11 @@ TEST_F(ChannelTest, Basic)
 
     // XXX need an exception type for timeout
     EXPECT_THROW(
-	channel.call(client.get(), 1,
-		     [](XdrSink* xdrs) {},
-		     [](XdrSource* xdrs) {},
-		     chrono::milliseconds(1)),
-	RpcError);
+        channel.call(client.get(), 1,
+                     [](XdrSink* xdrs) {},
+                     [](XdrSource* xdrs) {},
+                     chrono::milliseconds(1)),
+        RpcError);
 }
 
 TEST_F(ChannelTest, LocalChannel)
@@ -271,19 +271,19 @@ TEST_F(ChannelTest, LocalChannel)
 
     // Add a service handler for program 1234, version 2
     auto handler = [](uint32_t proc, XdrSource* xdrin, XdrSink* xdrout)
-	{
-	    uint32_t v;
-	    switch (proc) {
-	    case 0:
-		return true;
-	    case 1:
-		xdr(v, xdrin);
-		xdr(v, xdrout);
-		return true;
-	    default:
-		return false;
-	    }
-	};
+        {
+            uint32_t v;
+            switch (proc) {
+            case 0:
+                return true;
+            case 1:
+                xdr(v, xdrin);
+                xdr(v, xdrout);
+                return true;
+            default:
+                return false;
+            }
+        };
     svcreg->add(1234, 2, ServiceEntry{handler, {0, 1}});
 
     // Try calling with the wrong version number and check for
@@ -311,19 +311,19 @@ TEST_F(ChannelTest, LocalManyThreads)
 
     // Add a service handler for program 1234, version 1
     auto handler = [](uint32_t proc, XdrSource* xdrin, XdrSink* xdrout)
-	{
-	    uint32_t v;
-	    switch (proc) {
-	    case 0:
-		return true;
-	    case 1:
-		xdr(v, xdrin);
-		xdr(v, xdrout);
-		return true;
-	    default:
-		return false;
-	    }
-	};
+        {
+            uint32_t v;
+            switch (proc) {
+            case 0:
+                return true;
+            case 1:
+                xdr(v, xdrin);
+                xdr(v, xdrout);
+                return true;
+            default:
+                return false;
+            }
+        };
     svcreg->add(1234, 1, ServiceEntry{handler, {0, 1}});
 
     int threadCount = 20;
@@ -331,10 +331,10 @@ TEST_F(ChannelTest, LocalManyThreads)
 
     deque<thread> threads;
     for (int i = 0; i < threadCount; i++)
-	threads.push_back(callMany(cl, 1, iterations));
+        threads.push_back(callMany(cl, 1, iterations));
 
     for (auto& t: threads)
-	t.join();
+        t.join();
 }
 
 TEST_F(ChannelTest, DatagramChannel)
@@ -348,7 +348,7 @@ TEST_F(ChannelTest, DatagramChannel)
 
     int ssock = socket(AF_LOCAL, SOCK_DGRAM, 0);
     ASSERT_GE(::bind(ssock, reinterpret_cast<const sockaddr*>(&saddr),
-		     sizeof(saddr)), 0);
+                     sizeof(saddr)), 0);
 
     SimpleDatagramServer server(ssock);
 
@@ -362,9 +362,9 @@ TEST_F(ChannelTest, DatagramChannel)
     // Bind to our reply address and connect to the server address
     int clsock = socket(AF_LOCAL, SOCK_DGRAM, 0);
     ASSERT_GE(::bind(clsock, reinterpret_cast<const sockaddr*>(&claddr),
-		     sizeof(claddr)), 0);
+                     sizeof(claddr)), 0);
     ASSERT_GE(::connect(clsock, reinterpret_cast<sockaddr*>(&saddr),
-			sizeof(saddr)), 0);
+                        sizeof(saddr)), 0);
     
     // Send a message and check the reply
     auto chan = make_shared<DatagramChannel>(clsock);
@@ -387,7 +387,7 @@ TEST_F(ChannelTest, DatagramManyThreads)
 
     int ssock = socket(AF_LOCAL, SOCK_DGRAM, 0);
     ASSERT_GE(::bind(ssock, reinterpret_cast<const sockaddr*>(&saddr),
-		     sizeof(saddr)), 0);
+                     sizeof(saddr)), 0);
 
     SimpleDatagramServer server(ssock);
 
@@ -401,9 +401,9 @@ TEST_F(ChannelTest, DatagramManyThreads)
     // Bind to our reply address and connect to the server address
     int clsock = socket(AF_LOCAL, SOCK_DGRAM, 0);
     ASSERT_GE(::bind(clsock, reinterpret_cast<const sockaddr*>(&claddr),
-		     sizeof(claddr)), 0);
+                     sizeof(claddr)), 0);
     ASSERT_GE(::connect(clsock, reinterpret_cast<sockaddr*>(&saddr),
-			sizeof(saddr)), 0);
+                        sizeof(saddr)), 0);
     auto chan = make_shared<DatagramChannel>(clsock);
 
     int threadCount = 20;
@@ -411,10 +411,10 @@ TEST_F(ChannelTest, DatagramManyThreads)
 
     deque<thread> threads;
     for (int i = 0; i < threadCount; i++)
-	threads.push_back(callMany(chan, 1, iterations));
+        threads.push_back(callMany(chan, 1, iterations));
 
     for (auto& t: threads)
-	t.join();
+        t.join();
 
     // Ask the server to stop running
     server.stop(chan, client);
@@ -458,10 +458,10 @@ TEST_F(ChannelTest, StreamManyThreads)
 
     deque<thread> threads;
     for (int i = 0; i < threadCount; i++)
-	threads.push_back(callMany(chan, 1, iterations));
+        threads.push_back(callMany(chan, 1, iterations));
 
     for (auto& t: threads)
-	t.join();
+        t.join();
 
     // Ask the server to stop running
     server.stop(chan, client);

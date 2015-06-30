@@ -80,60 +80,60 @@ class Portmap
 {
 public:
     Portmap(std::shared_ptr<Channel> channel)
-	: channel_(channel),
-	  client_(std::make_shared<Client>(PMAPPROG, PMAPVERS))
+        : channel_(channel),
+          client_(std::make_shared<Client>(PMAPPROG, PMAPVERS))
     {
     }
 
     void null()
     {
-	channel_->call(client_.get(), PMAPPROC_NULL,
-		       [](XdrSink*) {}, [](XdrSource*) {});
+        channel_->call(client_.get(), PMAPPROC_NULL,
+                       [](XdrSink*) {}, [](XdrSource*) {});
     }
 
     bool set(const mapping& args)
     {
-	bool res;
-	channel_->call(client_.get(), PMAPPROC_SET,
-		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return res;
+        bool res;
+        channel_->call(client_.get(), PMAPPROC_SET,
+                      [&](XdrSink* xdrs) { xdr(args, xdrs); },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return res;
     }
 
     bool unset(const mapping& args)
     {
-	bool res;
-	channel_->call(client_.get(), PMAPPROC_UNSET,
-		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return res;
+        bool res;
+        channel_->call(client_.get(), PMAPPROC_UNSET,
+                      [&](XdrSink* xdrs) { xdr(args, xdrs); },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return res;
     }
 
     uint32_t getport(const mapping& args)
     {
-	uint32_t res;
-	channel_->call(client_.get(), PMAPPROC_GETPORT,
-		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return res;
+        uint32_t res;
+        channel_->call(client_.get(), PMAPPROC_GETPORT,
+                      [&](XdrSink* xdrs) { xdr(args, xdrs); },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return res;
     }
 
     std::unique_ptr<pmaplist> dump()
     {
-	std::unique_ptr<pmaplist> res;
-	channel_->call(client_.get(), PMAPPROC_DUMP,
-		      [&](XdrSink* xdrs) { },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return std::move(res);
+        std::unique_ptr<pmaplist> res;
+        channel_->call(client_.get(), PMAPPROC_DUMP,
+                      [&](XdrSink* xdrs) { },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return std::move(res);
     }
 
     call_result callit(call_args args)
     {
-	call_result res;
-	channel_->call(client_.get(), PMAPPROC_CALLIT,
-		      [&](XdrSink* xdrs) { xdr(args, xdrs); },
-		      [&](XdrSource* xdrs) { xdr(res, xdrs); });
-	return std::move(res);
+        call_result res;
+        channel_->call(client_.get(), PMAPPROC_CALLIT,
+                      [&](XdrSink* xdrs) { xdr(args, xdrs); },
+                      [&](XdrSource* xdrs) { xdr(res, xdrs); });
+        return std::move(res);
     }
 
 private:

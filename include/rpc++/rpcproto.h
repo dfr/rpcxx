@@ -127,14 +127,14 @@ void xdr(RefType<accepted_reply, XDR> v, XDR* xdrs)
     xdr(v.verf, xdrs);
     xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.stat), xdrs);
     if (v.stat == PROG_MISMATCH)
-	xdr(v.mismatch_info, xdrs);
+        xdr(v.mismatch_info, xdrs);
 }
 
 struct rejected_reply {
     reject_stat stat;
     union {
-	version_mismatch rpc_mismatch;
-	auth_stat auth_error;
+        version_mismatch rpc_mismatch;
+        auth_stat auth_error;
     };
 };
 
@@ -144,24 +144,24 @@ void xdr(RefType<rejected_reply, XDR> v, XDR* xdrs)
     xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.stat), xdrs);
     switch (v.stat) {
     case RPC_MISMATCH:
-	xdr(v.rpc_mismatch, xdrs);
-	break;
+        xdr(v.rpc_mismatch, xdrs);
+        break;
     case AUTH_ERROR:
-	xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.auth_error), xdrs);
-	break;
+        xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.auth_error), xdrs);
+        break;
     default:
-	break;
+        break;
     }
 }
 
 struct reply_body {
     reply_stat stat;
     union reply {
-	accepted_reply areply;
-	rejected_reply rreply;
+        accepted_reply areply;
+        rejected_reply rreply;
     };
     std::aligned_union<
-	sizeof(reply), accepted_reply, rejected_reply>::type storage;
+        sizeof(reply), accepted_reply, rejected_reply>::type storage;
     bool hasValue = false;
 
     reply_body()
@@ -169,89 +169,89 @@ struct reply_body {
     }
 
     reply_body(accepted_reply&& areply)
-	: stat(MSG_ACCEPTED)
+        : stat(MSG_ACCEPTED)
     {
-	new(&storage) accepted_reply(std::move(areply));
-	hasValue = true;
+        new(&storage) accepted_reply(std::move(areply));
+        hasValue = true;
     }
 
     reply_body(rejected_reply&& rreply)
-	: stat(MSG_DENIED)
+        : stat(MSG_DENIED)
     {
-	new(&storage) rejected_reply(std::move(rreply));
-	hasValue = true;
+        new(&storage) rejected_reply(std::move(rreply));
+        hasValue = true;
     }
 
     reply_body(reply_body&& other)
     {
-	*this = std::move(other);
+        *this = std::move(other);
     }
 
     ~reply_body()
     {
-	clear();
+        clear();
     }
 
     reply_body& operator=(reply_body&& other)
     {
-	clear();
-	stat = other.stat;
-	if (other.hasValue) {
-	    switch (stat) {
-	    case MSG_ACCEPTED:
-		new(&storage) accepted_reply(std::move(other.areply()));
-		break;
-	    case MSG_DENIED:
-		new(&storage) rejected_reply(std::move(other.rreply()));
-		break;
-	    default:
-		break;
-	    }
-	    hasValue = true;
-	    other.clear();
-	}
-	return *this;
+        clear();
+        stat = other.stat;
+        if (other.hasValue) {
+            switch (stat) {
+            case MSG_ACCEPTED:
+                new(&storage) accepted_reply(std::move(other.areply()));
+                break;
+            case MSG_DENIED:
+                new(&storage) rejected_reply(std::move(other.rreply()));
+                break;
+            default:
+                break;
+            }
+            hasValue = true;
+            other.clear();
+        }
+        return *this;
     }
 
     void clear()
     {
-	if (hasValue) {
-	    switch (stat) {
-	    case MSG_ACCEPTED:
-		reinterpret_cast<accepted_reply*>(&storage)->~accepted_reply();
-		break;
-	    case MSG_DENIED:
-		reinterpret_cast<rejected_reply*>(&storage)->~rejected_reply();
-		break;
-	    default:
-		break;
-	    }
-	}
-	hasValue = false;
+        if (hasValue) {
+            switch (stat) {
+            case MSG_ACCEPTED:
+                reinterpret_cast<accepted_reply*>(&storage)->~accepted_reply();
+                break;
+            case MSG_DENIED:
+                reinterpret_cast<rejected_reply*>(&storage)->~rejected_reply();
+                break;
+            default:
+                break;
+            }
+        }
+        hasValue = false;
     }
 
     accepted_reply& areply()
     {
-	assert(hasValue && stat == MSG_ACCEPTED);
-	return *reinterpret_cast<accepted_reply*>(&storage);
+        assert(hasValue && stat == MSG_ACCEPTED);
+        return *reinterpret_cast<accepted_reply*>(&storage);
     }
 
     const accepted_reply& areply() const
     {
-	assert(hasValue && stat == MSG_ACCEPTED);
-	return *reinterpret_cast<const accepted_reply*>(&storage);
+        assert(hasValue && stat == MSG_ACCEPTED);
+        return *reinterpret_cast<const accepted_reply*>(&storage);
     }
 
     rejected_reply& rreply()
     {
-	assert(hasValue && stat == MSG_DENIED);
-	return *reinterpret_cast<rejected_reply*>(&storage);
+        assert(hasValue && stat == MSG_DENIED);
+        return *reinterpret_cast<rejected_reply*>(&storage);
     }
 
     const rejected_reply& rreply() const
     {
-	assert(hasValue && stat == MSG_DENIED);
-	return *reinterpret_cast<const rejected_reply*>(&storage);
+        assert(hasValue && stat == MSG_DENIED);
+        return *reinterpret_cast<const rejected_reply*>(&storage);
     }
 };
 
@@ -260,13 +260,13 @@ static void xdr(const reply_body& v, XdrSink* xdrs)
     xdr(v.stat, xdrs);
     switch (v.stat) {
     case MSG_ACCEPTED:
-	xdr(v.areply(), xdrs);
-	break;
+        xdr(v.areply(), xdrs);
+        break;
     case MSG_DENIED:
-	xdr(v.rreply(), xdrs);
-	break;
+        xdr(v.rreply(), xdrs);
+        break;
     default:
-	break;
+        break;
     }
 }
 
@@ -276,122 +276,122 @@ static void xdr(reply_body& v, XdrSource* xdrs)
     xdr(reinterpret_cast<uint32_t&>(v.stat), xdrs);
     switch (v.stat) {
     case MSG_ACCEPTED:
-	new(&v.storage) accepted_reply();
-	v.hasValue = true;
-	xdr(v.areply(), xdrs);
-	break;
+        new(&v.storage) accepted_reply();
+        v.hasValue = true;
+        xdr(v.areply(), xdrs);
+        break;
     case MSG_DENIED:
-	new(&v.storage) rejected_reply();
-	v.hasValue = true;
-	xdr(v.rreply(), xdrs);
-	break;
+        new(&v.storage) rejected_reply();
+        v.hasValue = true;
+        xdr(v.rreply(), xdrs);
+        break;
     default:
-	break;
+        break;
     }
 }
 
 struct rpc_msg {
     rpc_msg()
-	: xid(0)
+        : xid(0)
     {
     }
 
     rpc_msg(uint32_t id, call_body&& cb)
-	: xid(id),
-	  mtype(CALL)
+        : xid(id),
+          mtype(CALL)
     {
-	new(&storage) call_body(std::move(cb));
-	hasValue = true;
+        new(&storage) call_body(std::move(cb));
+        hasValue = true;
     }
 
     rpc_msg(uint32_t id, reply_body&& rb)
-	: xid(id),
-	  mtype(REPLY)
+        : xid(id),
+          mtype(REPLY)
     {
-	new(&storage) reply_body(std::move(rb));
-	hasValue = true;
+        new(&storage) reply_body(std::move(rb));
+        hasValue = true;
     }
 
     rpc_msg(rpc_msg&& other)
     {
-	*this = std::move(other);
+        *this = std::move(other);
     }
 
     ~rpc_msg()
     {
-	clear();
+        clear();
     }
 
     rpc_msg& operator=(rpc_msg&& other)
     {
-	clear();
-	xid = other.xid;
-	mtype = other.mtype;
-	if (other.hasValue) {
-	    switch (mtype) {
-	    case CALL:
-		new(&storage) call_body(std::move(other.cbody()));
-		break;
-	    case REPLY:
-		new(&storage) reply_body(std::move(other.rbody()));
-		break;
-	    default:
-		break;
-	    }
-	    hasValue = true;
-	    other.clear();
-	}
-	return *this;
+        clear();
+        xid = other.xid;
+        mtype = other.mtype;
+        if (other.hasValue) {
+            switch (mtype) {
+            case CALL:
+                new(&storage) call_body(std::move(other.cbody()));
+                break;
+            case REPLY:
+                new(&storage) reply_body(std::move(other.rbody()));
+                break;
+            default:
+                break;
+            }
+            hasValue = true;
+            other.clear();
+        }
+        return *this;
     }
 
     void clear()
     {
-	if (hasValue) {
-	    switch (mtype) {
-	    case CALL:
-		reinterpret_cast<call_body*>(&storage)->~call_body();
-		break;
-	    case REPLY:
-		reinterpret_cast<reply_body*>(&storage)->~reply_body();
-		break;
-	    default:
-		break;
-	    }
-	    hasValue = false;
-	}
+        if (hasValue) {
+            switch (mtype) {
+            case CALL:
+                reinterpret_cast<call_body*>(&storage)->~call_body();
+                break;
+            case REPLY:
+                reinterpret_cast<reply_body*>(&storage)->~reply_body();
+                break;
+            default:
+                break;
+            }
+            hasValue = false;
+        }
     }
 
     uint32_t xid;
     msg_type mtype;
     union body {
-	call_body cbody;
-	reply_body rbody;
+        call_body cbody;
+        reply_body rbody;
     };
     std::aligned_union<sizeof(body), call_body, reply_body>::type storage;
     bool hasValue = false;
 
     call_body& cbody()
     {
-	assert(hasValue && mtype == CALL);
-	return *reinterpret_cast<call_body*>(&storage);
+        assert(hasValue && mtype == CALL);
+        return *reinterpret_cast<call_body*>(&storage);
     }
 
     const call_body& cbody() const
     {
-	assert(hasValue && mtype == CALL);
-	return *reinterpret_cast<const call_body*>(&storage);
+        assert(hasValue && mtype == CALL);
+        return *reinterpret_cast<const call_body*>(&storage);
     }
 
     reply_body& rbody()
     {
-	assert(hasValue && mtype == REPLY);
-	return *reinterpret_cast<reply_body*>(&storage);
+        assert(hasValue && mtype == REPLY);
+        return *reinterpret_cast<reply_body*>(&storage);
     }
 
     const reply_body& rbody() const
     {
-	assert(hasValue && mtype == REPLY);
-	return *reinterpret_cast<const reply_body*>(&storage);
+        assert(hasValue && mtype == REPLY);
+        return *reinterpret_cast<const reply_body*>(&storage);
     }
 };
 
@@ -401,13 +401,13 @@ static void xdr(const rpc_msg& v, XdrSink* xdrs)
     xdr(v.mtype, xdrs);
     switch (v.mtype) {
     case CALL:
-	xdr(v.cbody(), xdrs);
-	break;
+        xdr(v.cbody(), xdrs);
+        break;
     case REPLY:
-	xdr(v.rbody(), xdrs);
-	break;
+        xdr(v.rbody(), xdrs);
+        break;
     default:
-	break;
+        break;
     }
 }
 
@@ -418,17 +418,17 @@ static void xdr(rpc_msg& v, XdrSource* xdrs)
     xdr(reinterpret_cast<uint32_t&>(v.mtype), xdrs);
     switch (v.mtype) {
     case CALL:
-	new(&v.storage) call_body();
-	v.hasValue = true;
-	xdr(v.cbody(), xdrs);
-	break;
+        new(&v.storage) call_body();
+        v.hasValue = true;
+        xdr(v.cbody(), xdrs);
+        break;
     case REPLY:
-	new(&v.storage) reply_body();
-	v.hasValue = true;
-	xdr(v.rbody(), xdrs);
-	break;
+        new(&v.storage) reply_body();
+        v.hasValue = true;
+        xdr(v.rbody(), xdrs);
+        break;
     default:
-	break;
+        break;
     }
 }
 

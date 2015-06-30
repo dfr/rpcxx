@@ -19,75 +19,75 @@ class ServerTest: public ::testing::Test
 {
 public:
     ServerTest()
-	: svcreg(make_shared<ServiceRegistry>()),
-	  client(make_shared<Client>(1234, 1))
+        : svcreg(make_shared<ServiceRegistry>()),
+          client(make_shared<Client>(1234, 1))
     {
-	addTestService();
+        addTestService();
     }
 
     bool testService(uint32_t proc, XdrSource* xdrin, XdrSink* xdrout)
     {
-	switch (proc) {
-	case 0:
-	    return true;
+        switch (proc) {
+        case 0:
+            return true;
 
-	case 1:
-	    uint32_t val;
-	    xdr(val, xdrin);
-	    xdr(val, xdrout);
-	    return true;
+        case 1:
+            uint32_t val;
+            xdr(val, xdrin);
+            xdr(val, xdrout);
+            return true;
 
-	default:
-	    return false;
-	}
+        default:
+            return false;
+        }
     }
 
     void addTestService()
     {
-	svcreg->add(
-	    1234, 1,
-	    ServiceEntry{
-		bind(&ServerTest::testService, this, _1, _2, _3),
-		{0, 1}});
+        svcreg->add(
+            1234, 1,
+            ServiceEntry{
+                bind(&ServerTest::testService, this, _1, _2, _3),
+                {0, 1}});
     }
 
     void checkReply(uint32_t prog, uint32_t vers, uint32_t proc,
-		    accept_stat expectedStat,
-		    const vector<uint8_t>& args,
-		    const vector<uint8_t>& res,
-		    rpc_msg* reply_msg = nullptr)
+                    accept_stat expectedStat,
+                    const vector<uint8_t>& args,
+                    const vector<uint8_t>& res,
+                    rpc_msg* reply_msg = nullptr)
     {
-	uint8_t call[1500];
-	uint8_t reply[1500];
-	auto xdrout = unique_ptr<XdrMemory>(
-	    new XdrMemory(call, sizeof(call)));
-	auto xdrin = unique_ptr<XdrMemory>(
-	    new XdrMemory(reply, sizeof(reply)));
+        uint8_t call[1500];
+        uint8_t reply[1500];
+        auto xdrout = unique_ptr<XdrMemory>(
+            new XdrMemory(call, sizeof(call)));
+        auto xdrin = unique_ptr<XdrMemory>(
+            new XdrMemory(reply, sizeof(reply)));
 
-	call_body cbody;
-	cbody.prog = prog;
-	cbody.vers = vers;
-	cbody.proc = proc;
-	rpc_msg msg(1, std::move(cbody));
-	xdr(msg, static_cast<XdrSink*>(xdrout.get()));
-	xdrout->putBytes(args.data(), args.size());
-	xdrout->rewind();
+        call_body cbody;
+        cbody.prog = prog;
+        cbody.vers = vers;
+        cbody.proc = proc;
+        rpc_msg msg(1, std::move(cbody));
+        xdr(msg, static_cast<XdrSink*>(xdrout.get()));
+        xdrout->putBytes(args.data(), args.size());
+        xdrout->rewind();
 
-	EXPECT_TRUE(svcreg->process(xdrout.get(), xdrin.get()));
-	xdrin->rewind();
-	xdr(msg, static_cast<XdrSource*>(xdrin.get()));
-	EXPECT_EQ(msg.xid, 1);
-	EXPECT_EQ(msg.mtype, REPLY);
-	EXPECT_EQ(msg.rbody().stat, MSG_ACCEPTED);
-	EXPECT_EQ(msg.rbody().areply().stat, expectedStat);
+        EXPECT_TRUE(svcreg->process(xdrout.get(), xdrin.get()));
+        xdrin->rewind();
+        xdr(msg, static_cast<XdrSource*>(xdrin.get()));
+        EXPECT_EQ(msg.xid, 1);
+        EXPECT_EQ(msg.mtype, REPLY);
+        EXPECT_EQ(msg.rbody().stat, MSG_ACCEPTED);
+        EXPECT_EQ(msg.rbody().areply().stat, expectedStat);
 
-	vector<uint8_t> t;
-	t.resize(res.size());
-	xdrin->getBytes(t.data(), t.size());
-	EXPECT_EQ(res, t);
+        vector<uint8_t> t;
+        t.resize(res.size());
+        xdrin->getBytes(t.data(), t.size());
+        EXPECT_EQ(res, t);
 
-	if (reply_msg)
-	    *reply_msg = std::move(msg);
+        if (reply_msg)
+            *reply_msg = std::move(msg);
     }
 
     shared_ptr<ServiceRegistry> svcreg;
@@ -104,9 +104,9 @@ TEST_F(ServerTest, ProtocolMismatch)
     uint8_t call[1500];
     uint8_t reply[1500];
     auto xdrout = unique_ptr<XdrMemory>(
-	new XdrMemory(call, sizeof(call)));
+        new XdrMemory(call, sizeof(call)));
     auto xdrin = unique_ptr<XdrMemory>(
-	new XdrMemory(reply, sizeof(reply)));
+        new XdrMemory(reply, sizeof(reply)));
 
     // Check RPC_MISMATCH is generated for rpcvers other than 2
     call_body cbody;
@@ -166,9 +166,9 @@ TEST_F(ServerTest, Stream)
 
     // Send a message and check the reply
     chan->call(
-	client.get(), 1,
-	[](XdrSink* xdrs) { uint32_t v = 123; xdr(v, xdrs); },
-	[](XdrSource* xdrs) { uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
+        client.get(), 1,
+        [](XdrSink* xdrs) { uint32_t v = 123; xdr(v, xdrs); },
+        [](XdrSource* xdrs) { uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
 
     // Close this side of the socket pair which should prompt the
     // connection registry to stop when it notices the end-of-file
@@ -197,14 +197,14 @@ TEST_F(ServerTest, Listen)
     // Test connecting to the socket
     int sock = socket(AF_LOCAL, SOCK_STREAM, 0);
     ASSERT_GE(::connect(
-		  sock, reinterpret_cast<sockaddr*>(&sun), sizeof(sun)), 0);
+                  sock, reinterpret_cast<sockaddr*>(&sun), sizeof(sun)), 0);
     
     // Send a message and check the reply
     auto chan = make_shared<StreamChannel>(sock);
     chan->call(
-	client.get(), 1,
-	[](XdrSink* xdrs) { uint32_t v = 123; xdr(v, xdrs); },
-	[](XdrSource* xdrs) { uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
+        client.get(), 1,
+        [](XdrSink* xdrs) { uint32_t v = 123; xdr(v, xdrs); },
+        [](XdrSource* xdrs) { uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
 
     // Close this side of the socket pair. The connection registry
     // won't stop running automatically since the listen socket is

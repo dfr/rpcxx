@@ -11,19 +11,19 @@ namespace oncrpc {
 static std::pair<int, int> getNetType(const std::string& nettype)
 {
     if (nettype == "tcp")
-	return std::make_pair(PF_UNSPEC, SOCK_STREAM);
+        return std::make_pair(PF_UNSPEC, SOCK_STREAM);
     if (nettype == "udp")
-	return std::make_pair(PF_UNSPEC, SOCK_DGRAM);
+        return std::make_pair(PF_UNSPEC, SOCK_DGRAM);
 
     if (nettype == "tcp4")
-	return std::make_pair(PF_INET, SOCK_STREAM);
+        return std::make_pair(PF_INET, SOCK_STREAM);
     if (nettype == "udp4")
-	return std::make_pair(PF_INET, SOCK_DGRAM);
+        return std::make_pair(PF_INET, SOCK_DGRAM);
 
     if (nettype == "tcp6")
-	return std::make_pair(PF_INET6, SOCK_STREAM);
+        return std::make_pair(PF_INET6, SOCK_STREAM);
     if (nettype == "udp6")
-	return std::make_pair(PF_INET6, SOCK_DGRAM);
+        return std::make_pair(PF_INET6, SOCK_DGRAM);
 
     throw RpcError("Bad nettype");
 }
@@ -45,15 +45,15 @@ std::unique_ptr<AddressInfo> uaddr2taddr(
 {
     auto portloIndex = uaddr.rfind('.');
     if (portloIndex == std::string::npos)
-	throw RpcError(
-	    "malformed address from remote rpcbind: " + uaddr);
+        throw RpcError(
+            "malformed address from remote rpcbind: " + uaddr);
     auto porthiIndex = uaddr.rfind('.', portloIndex - 1);
     if (porthiIndex == std::string::npos)
-	throw RpcError(
-	    "malformed address from remote rpcbind: " + uaddr);
+        throw RpcError(
+            "malformed address from remote rpcbind: " + uaddr);
     auto host = uaddr.substr(0, porthiIndex);
     auto porthi = std::stoi(
-	uaddr.substr(porthiIndex + 1, portloIndex - porthiIndex - 1));
+        uaddr.substr(porthiIndex + 1, portloIndex - porthiIndex - 1));
     auto portlo = std::stoi(uaddr.substr(portloIndex + 1));
     auto port = (porthi << 8) + portlo;
 
@@ -68,7 +68,7 @@ std::unique_ptr<AddressInfo> uaddr2taddr(
 
     int err = getaddrinfo(host.c_str(), service.c_str(), &hints, &addrs);
     if (err)
-	throw RpcError(std::string("getaddrinfo: ") + gai_strerror(err));
+        throw RpcError(std::string("getaddrinfo: ") + gai_strerror(err));
 
     auto res = std::make_unique<AddressInfo>(addrs);
     freeaddrinfo(addrs);
@@ -87,14 +87,14 @@ std::vector<AddressInfo> getAddressInfo(
     hints.ai_socktype = std::get<1>(nt);
     int err = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &res0);
     if (err) {
-	std::ostringstream msg;
-	msg << "RPC: " << host << ":" << service << ": " << gai_strerror(err);
-	throw RpcError(msg.str());
+        std::ostringstream msg;
+        msg << "RPC: " << host << ":" << service << ": " << gai_strerror(err);
+        throw RpcError(msg.str());
     }
 
     std::vector<AddressInfo> addrs;
     for (addrinfo* res = res0; res; res = res->ai_next)
-	addrs.emplace_back(res);
+        addrs.emplace_back(res);
     ::freeaddrinfo(res0);
 
     return addrs;
@@ -111,27 +111,27 @@ int connectSocket(
     std::error_code ec;
     bool isStream = false;
     for (const auto& addr: addrs) {
-	isStream = addr.socktype == SOCK_STREAM;
-	s = ::socket(addr.family, addr.socktype, addr.protocol);
-	if (s < 0) {
-	    cause = "socket";
-	    ec = std::error_code(errno, std::system_category());
-	    continue;
-	}
+        isStream = addr.socktype == SOCK_STREAM;
+        s = ::socket(addr.family, addr.socktype, addr.protocol);
+        if (s < 0) {
+            cause = "socket";
+            ec = std::error_code(errno, std::system_category());
+            continue;
+        }
 
-	if (::connect(s, addr.addr, addr.addrlen) < 0) {
-	    cause = "connect";
-	    ec = std::error_code(errno, std::system_category());
-	    ::close(s);
-	    s = -1;
-	    continue;
-	}
+        if (::connect(s, addr.addr, addr.addrlen) < 0) {
+            cause = "connect";
+            ec = std::error_code(errno, std::system_category());
+            ::close(s);
+            s = -1;
+            continue;
+        }
 
-	break;
+        break;
     }
 
     if (s == -1)
-	throw std::system_error(ec);
+        throw std::system_error(ec);
 
     return s;
 }
@@ -144,28 +144,28 @@ std::shared_ptr<Channel> connectChannel(std::unique_ptr<AddressInfo>&& addr)
 
     s = socket(addr->family, addr->socktype, addr->protocol);
     if (s < 0) {
-	cause = "socket";
-	ec = std::error_code(errno, std::system_category());
+        cause = "socket";
+        ec = std::error_code(errno, std::system_category());
     }
     else {
-	if (connect(s, addr->addr, addr->addrlen) < 0) {
-	    cause = "connect";
-	    ec = std::error_code(errno, std::system_category());
-	    close(s);
-	    s = -1;
-	}
+        if (connect(s, addr->addr, addr->addrlen) < 0) {
+            cause = "connect";
+            ec = std::error_code(errno, std::system_category());
+            close(s);
+            s = -1;
+        }
     }
 
     if (s == -1) {
-	std::ostringstream ss;
-	ss << cause << ": " << ec.message();
-	throw RpcError(ss.str());
+        std::ostringstream ss;
+        ss << cause << ": " << ec.message();
+        throw RpcError(ss.str());
     }
 
     if (addr->socktype == SOCK_STREAM)
-	return std::make_shared<StreamChannel>(s);
+        return std::make_shared<StreamChannel>(s);
     else
-	return std::make_shared<DatagramChannel>(s);
+        return std::make_shared<DatagramChannel>(s);
 }
 
 std::shared_ptr<Channel> connectChannel(
@@ -175,7 +175,7 @@ std::shared_ptr<Channel> connectChannel(
     auto rpcbind = RpcBind(connectChannel(host, "sunrpc", nettype));
     auto uaddr = rpcbind.getaddr(rpcb{prog, vers, "", "", ""});
     if (uaddr == "") {
-	throw RpcError("Program not registered");
+        throw RpcError("Program not registered");
     }
     return connectChannel(uaddr2taddr(uaddr, nettype));
 }
@@ -187,9 +187,9 @@ std::shared_ptr<Channel> connectChannel(
     int sock;
     sock = connectSocket(host, service, nettype);
     if (std::get<1>(getNetType(nettype)) == SOCK_STREAM)
-	return std::make_shared<StreamChannel>(sock);
+        return std::make_shared<StreamChannel>(sock);
     else
-	return std::make_shared<DatagramChannel>(sock);
+        return std::make_shared<DatagramChannel>(sock);
 }
 
 }

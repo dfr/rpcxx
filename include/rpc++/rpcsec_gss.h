@@ -27,9 +27,9 @@ constexpr uint32_t MAXSEQ = 0x80000000;
 struct rpc_gss_cred_vers_1_t
 {
     uint32_t gss_ver = 1;
-    rpc_gss_proc_t gss_proc;	// control procedure
-    uint32_t seq_num;		// sequence number
-    rpc_gss_service_t service;	// service used
+    rpc_gss_proc_t gss_proc;    // control procedure
+    uint32_t seq_num;           // sequence number
+    rpc_gss_service_t service;  // service used
     std::vector<uint8_t> handle; // context handle
 };
 

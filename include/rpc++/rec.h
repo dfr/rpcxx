@@ -11,8 +11,8 @@ class RecordWriter: public XdrSink
 {
 public:
     RecordWriter(
-	size_t buflen,
-	std::function<ptrdiff_t(const void*, size_t)> flush);
+        size_t buflen,
+        std::function<ptrdiff_t(const void*, size_t)> flush);
 
     void pushRecord();
 

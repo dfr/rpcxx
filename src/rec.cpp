@@ -42,11 +42,11 @@ RecordWriter::flush(bool endOfRecord)
     assert(len > 4);
     uint32_t rec = len - 4;
     if (endOfRecord)
-	rec |= 1 << 31;
+        rec |= 1 << 31;
     *reinterpret_cast<XdrWord*>(buf_.data()) = rec;
     auto n = flush_(buf_.data(), len);
     if (n != len)
-	throw XdrError("short write");
+        throw XdrError("short write");
     startNewFragment();
 }
 
@@ -74,8 +74,8 @@ RecordReader::skipRecord()
 {
 #if 0
     debug (rec) {
-	writefln("skipRecord(): lastFragment_=%s, fragRemaining_=%d",
-		 lastFragment_, fragRemaining_);
+        writefln("skipRecord(): lastFragment_=%s, fragRemaining_=%d",
+                 lastFragment_, fragRemaining_);
     }
 #endif
     
@@ -83,14 +83,14 @@ RecordReader::skipRecord()
     fragBuffered_ = 0;
 
     if (lastFragment_ == true && fragRemaining_ == 0)
-	return;
+        return;
     while (lastFragment_ == false || fragRemaining_ > 0) {
-	auto n = readLimit_ - readCursor_;
-	readCursor_ = readLimit_;
-	fragRemaining_ -= n;
-	fragBuffered_ -= n;
-	if (lastFragment_ == false || fragRemaining_ > 0)
-	    fill();
+        auto n = readLimit_ - readCursor_;
+        readCursor_ = readLimit_;
+        fragRemaining_ -= n;
+        fragBuffered_ -= n;
+        if (lastFragment_ == false || fragRemaining_ > 0)
+            fill();
     }
     lastFragment_ = false;
 }
@@ -119,59 +119,59 @@ RecordReader::fill()
     // buffer contains multiple fragments which could happen if we
     // have a client buffer up several messages before sending.
     if (fragRemaining_ == 0) {
-	// If we have data buffered, try to use it now, otherwise read
-	// from upstream. We need to make sure that we have a complete
-	// fragment header in our buffer.
-	while (readCursor_ + 4 > bufferLimit_) {
-	    // We need to read more data from upstream. Move what we
-	    // have to the beginning of our buffer first.
-	    auto n = bufferLimit_ - readCursor_;
-	    if (n > 0 && readCursor_ != buf_.data())
-		std::copy_n(readCursor_, n, buf_.data());
-	    readCursor_ = buf_.data();
-	    bufferLimit_ = const_cast<uint8_t*>(readCursor_ + n);
+        // If we have data buffered, try to use it now, otherwise read
+        // from upstream. We need to make sure that we have a complete
+        // fragment header in our buffer.
+        while (readCursor_ + 4 > bufferLimit_) {
+            // We need to read more data from upstream. Move what we
+            // have to the beginning of our buffer first.
+            auto n = bufferLimit_ - readCursor_;
+            if (n > 0 && readCursor_ != buf_.data())
+                std::copy_n(readCursor_, n, buf_.data());
+            readCursor_ = buf_.data();
+            bufferLimit_ = const_cast<uint8_t*>(readCursor_ + n);
 
-	    n = fill_(bufferLimit_, buf_.size() - n);
-	    if (n <= 0)
-		throw XdrError("end of file");
-	    bufferLimit_ += n;
-	}
+            n = fill_(bufferLimit_, buf_.size() - n);
+            if (n <= 0)
+                throw XdrError("end of file");
+            bufferLimit_ += n;
+        }
     }
     else {
-	// Read from upstream
-	auto n = fill_(buf_.data(), buf_.size());
-	if (n <= 0)
-	    throw XdrError("end of file");
-	readCursor_ = buf_.data();
-	bufferLimit_ = const_cast<uint8_t*>(readCursor_ + n);
+        // Read from upstream
+        auto n = fill_(buf_.data(), buf_.size());
+        if (n <= 0)
+            throw XdrError("end of file");
+        readCursor_ = buf_.data();
+        bufferLimit_ = const_cast<uint8_t*>(readCursor_ + n);
     }
     if (fragRemaining_ == 0) {
-	// We refuse to read past the end of the last fragment until
-	// our owner tells us we are finished with the whole
-	// record. Note that we have already ensured that we at least
-	// have a complete fragment header in our buffer.
-	if (lastFragment_)
-	    throw XdrError("end of record");
-	uint32_t rec = *reinterpret_cast<const XdrWord*>(readCursor_);
-	readCursor_ += sizeof(rec);
-	fragRemaining_ = rec & 0x7fffffff;
-	lastFragment_ = (rec & (1 << 31)) != 0;
+        // We refuse to read past the end of the last fragment until
+        // our owner tells us we are finished with the whole
+        // record. Note that we have already ensured that we at least
+        // have a complete fragment header in our buffer.
+        if (lastFragment_)
+            throw XdrError("end of record");
+        uint32_t rec = *reinterpret_cast<const XdrWord*>(readCursor_);
+        readCursor_ += sizeof(rec);
+        fragRemaining_ = rec & 0x7fffffff;
+        lastFragment_ = (rec & (1 << 31)) != 0;
 #if 0
-	debug (rec) {
-	    writefln("New fragment, fragRemaining_=%d, lastFragment_=%s",
-		     fragRemaining_, lastFragment_);
-	}
+        debug (rec) {
+            writefln("New fragment, fragRemaining_=%d, lastFragment_=%s",
+                     fragRemaining_, lastFragment_);
+        }
 #endif
     }
 
     // Keep track how far we can read from our buffer while
     // remaining in the current fragment
     if (readCursor_ + fragRemaining_ < bufferLimit_) {
-	readLimit_ = readCursor_ + fragRemaining_;
-	fragBuffered_ = fragRemaining_;
+        readLimit_ = readCursor_ + fragRemaining_;
+        fragBuffered_ = fragRemaining_;
     }
     else {
-	readLimit_ = bufferLimit_;
-	fragBuffered_ = bufferLimit_ - readCursor_;
+        readLimit_ = bufferLimit_;
+        fragBuffered_ = bufferLimit_ - readCursor_;
     }
 }
