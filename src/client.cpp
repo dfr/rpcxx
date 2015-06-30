@@ -45,12 +45,23 @@ Client::encodeCall(
     uint32_t xid, uint32_t proc, XdrSink* xdrs)
 {
     // Derived classes should call this before encoding cred and verf
-    xdrs->putWord(xid);
-    xdrs->putWord(CALL);
-    xdrs->putWord(2);
-    xdrs->putWord(program_);
-    xdrs->putWord(version_);
-    xdrs->putWord(proc);
+    XdrWord* p = xdrs->writeInline<XdrWord>(6 * sizeof(XdrWord));
+    if (p) {
+	*p++ = xid;
+	*p++ = CALL;
+	*p++ = 2;
+	*p++ = program_;
+	*p++ = version_;
+	*p++ = proc;
+    }
+    else {
+	xdrs->putWord(xid);
+	xdrs->putWord(CALL);
+	xdrs->putWord(2);
+	xdrs->putWord(program_);
+	xdrs->putWord(version_);
+	xdrs->putWord(proc);
+    }
 }
 
 namespace {
@@ -98,7 +109,7 @@ SysClient::SysClient(uint32_t program, uint32_t version)
     cred_.resize(512);
     auto xdrs = std::make_unique<XdrMemory>(cred_.data(), 512);
     xdr(parms, static_cast<XdrSink*>(xdrs.get()));
-    cred_.resize(xdrs->pos());
+    cred_.resize(xdrs->writePos());
 }
 
 uint32_t

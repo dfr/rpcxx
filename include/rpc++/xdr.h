@@ -18,12 +18,12 @@ using std::uint64_t;
 
 /// These templates are used to implement bounded strings and arrays
 /// (e.g. string<512> or int<10> in the XDR language).
-template <int N>
+template <size_t N>
 class bounded_string: public std::string
 {
 };
 
-template <typename T, int N>
+template <typename T, size_t N>
 class bounded_vector: public std::vector<T>
 {
 };
@@ -88,17 +88,69 @@ public:
     ~XdrSink() {}
 
     /// Write a 32-bit word to the stream
-    virtual void putWord(uint32_t v) = 0;
+    void putWord(const uint32_t v)
+    {
+	if (writeCursor_ + sizeof(v) > writeLimit_)
+	    flush();
+	*reinterpret_cast<XdrWord*>(writeCursor_) = v;
+	writeCursor_ += sizeof(v);
+    }
 
     /// Write a sequence of bytes to the stream and pad to the nearest
     /// 32-bit boundary with zeros
-    virtual void putBytes(const uint8_t* p, size_t len) = 0;
+    void putBytes(const uint8_t* p, size_t len)
+    {
+	size_t pad = __round(len) - len;
+	while (len > 0) {
+	    if (writeCursor_ == writeLimit_)
+		flush();
+	    size_t n = writeLimit_ - writeCursor_;
+	    if (n > len)
+		n = len;
+	    std::copy_n(p, n, writeCursor_);
+	    p += n;
+	    writeCursor_ += n;
+	    len -= n;
+	}
+	while (pad > 0) {
+	    if (writeCursor_ == writeLimit_)
+		flush();
+	    size_t n = writeLimit_ - writeCursor_;
+	    if (n > pad)
+		n = pad;
+	    std::fill_n(writeCursor_, n, 0);
+	    writeCursor_ += n;
+	    pad -= n;
+	}
+    }
+
     void putBytes(const void* p, size_t len)
     {
 	putBytes(static_cast<const uint8_t*>(p), len);
     }
-};
 
+    /// If there is at least len bytes of space in the write buffer,
+    /// return a pointer to the next free byte and advance the write
+    /// cursor by len bytes. If not, return nullptr. Len must be a
+    /// multiple of sizeof(XdrWord).
+    template <typename T>
+    T* writeInline(size_t len)
+    {
+	assert(len == __round(len));
+	T* p = nullptr;
+	if (writeCursor_ + len <= writeLimit_) {
+	    p = reinterpret_cast<T*>(writeCursor_);
+	    writeCursor_ += len;
+	}
+	return p;
+    }
+
+    virtual void flush() = 0;
+
+protected:
+    uint8_t* writeCursor_;
+    uint8_t* writeLimit_;
+};
 
 class XdrSource
 {
@@ -106,15 +158,56 @@ public:
     ~XdrSource() {}
 
     /// Read a 32-bit word from the stream
-    virtual void getWord(uint32_t& v) = 0;
+    void getWord(uint32_t& v)
+    {
+	if (readCursor_ + sizeof(v) > readLimit_) {
+	    uint8_t buf[sizeof(v)];
+	    getBytes(buf, sizeof(v));
+	    v = *reinterpret_cast<const XdrWord*>(buf);
+	}
+	else {
+	    v = *reinterpret_cast<const XdrWord*>(readCursor_);
+	    readCursor_ += sizeof(v);
+	}
+    }
 
     /// Read a sequence of bytes from the stream and skip the
     /// following padding up to the next 32-bit boundary
-    virtual void getBytes(uint8_t* p, size_t len) = 0;
+    void getBytes(uint8_t* p, size_t len)
+    {
+	size_t pad = __round(len) - len;
+	while (len > 0) {
+	    if (readCursor_ == readLimit_)
+		fill();
+	    size_t n = readLimit_ - readCursor_;
+	    if (n > len)
+		n = len;
+	    std::copy_n(readCursor_, n, p);
+	    p += n;
+	    readCursor_ += n;
+	    len -= n;
+	}
+	while (pad > 0) {
+	    if (readCursor_ == readLimit_)
+		fill();
+	    size_t n = readLimit_ - readCursor_;
+	    if (n > pad)
+		n = pad;
+	    readCursor_ += n;
+	    pad -= n;
+	}
+    }
+
     void getBytes(void* p, size_t len)
     {
 	getBytes(static_cast<uint8_t*>(p), len);
     }
+
+    virtual void fill() = 0;
+
+protected:
+    const uint8_t* readCursor_;
+    const uint8_t* readLimit_;
 };
 
 /// Expands to either T& or const T& depending on whether XDR is
@@ -133,7 +226,8 @@ inline void xdr(uint32_t& v, XdrSource* xdrs)
     xdrs->getWord(v);
 }
 
-inline void xdr(const uint64_t v, XdrSink* xdrs)
+inline void
+xdr(const uint64_t v, XdrSink* xdrs)
 {
     xdrs->putWord(static_cast<uint32_t>(v >> 32));
     xdrs->putWord(static_cast<uint32_t>(v));
@@ -173,7 +267,7 @@ inline void xdr(std::vector<uint8_t>& v, XdrSource* xdrs)
     xdrs->getBytes(v.data(), v.size());
 }
 
-template <int N>
+template <size_t N>
 inline void xdr(const bounded_vector<uint8_t, N>& v, XdrSink* xdrs)
 {
     assert(v.size() <= N);
@@ -181,7 +275,7 @@ inline void xdr(const bounded_vector<uint8_t, N>& v, XdrSink* xdrs)
     xdrs->putBytes(v.data(), v.size());
 }
 
-template <int N>
+template <size_t N>
 inline void xdr(bounded_vector<uint8_t, N>& v, XdrSource* xdrs)
 {
     uint32_t len;
@@ -206,7 +300,7 @@ inline void xdr(std::string& v, XdrSource* xdrs)
     xdrs->getBytes(reinterpret_cast<uint8_t*>(&v[0]), v.size());
 }
 
-template <int N>
+template <size_t N>
 inline void xdr(const bounded_string<N>& v, XdrSink* xdrs)
 {
     assert(v.size() <= N);
@@ -214,7 +308,7 @@ inline void xdr(const bounded_string<N>& v, XdrSink* xdrs)
     xdrs->putBytes(reinterpret_cast<const uint8_t*>(v.data()), v.size());
 }
 
-template <int N>
+template <size_t N>
 inline void xdr(bounded_string<N>& v, XdrSource* xdrs)
 {
     uint32_t len;
@@ -321,8 +415,8 @@ inline void xdr(std::vector<T>& v, XdrSource* xdrs)
 	xdr(e, xdrs);
 }
 
-template <typename T, int N>
-inline void xdr(const bounded_vector<T,N>& v, XdrSink* xdrs)
+template <typename T, size_t N>
+inline void xdr(const bounded_vector<T, N>& v, XdrSink* xdrs)
 {
     uint32_t sz = v.size();
     assert(sz <= N);
@@ -331,8 +425,8 @@ inline void xdr(const bounded_vector<T,N>& v, XdrSink* xdrs)
 	xdr(e, xdrs);
 }
 
-template <typename T, int N>
-inline void xdr(bounded_vector<T,N>& v, XdrSource* xdrs)
+template <typename T, size_t N>
+inline void xdr(bounded_vector<T, N>& v, XdrSource* xdrs)
 {
     uint32_t sz;
     xdr(sz, xdrs);
@@ -389,13 +483,20 @@ public:
 
     void rewind()
     {
-	next_ = buf_;
+	writeCursor_ = buf_;
+	readCursor_ = buf_;
     }
 
-    void setSize(size_t sz)
+    void setWriteSize(size_t sz)
     {
 	assert(sz <= size_);
-	limit_ = buf_ + sz;
+	writeLimit_ = buf_ + sz;
+    }
+
+    void setReadSize(size_t sz)
+    {
+	assert(sz <= size_);
+	readLimit_ = buf_ + sz;
     }
 
     size_t bufferSize() const
@@ -403,46 +504,46 @@ public:
 	return size_;
     }
     
-    size_t pos() const
+    size_t writePos() const
     {
-	return next_ - buf_;
+	return writeCursor_ - buf_;
+    }
+
+    size_t readPos() const
+    {
+	return readCursor_ - buf_;
     }
 
     // XdrSink overrides
-    virtual void putWord(uint32_t v) override;
-    virtual void putBytes(const uint8_t* p, size_t len) override;
+    void flush() override;
 
     // XdrSource overrides
-    virtual void getWord(uint32_t& v) override;
-    virtual void getBytes(uint8_t* p, size_t len) override;
+    void fill() override;
 
 private:
-    void checkSpace(size_t len);
-
     std::unique_ptr<uint8_t[]> storage_;
     size_t size_;
     uint8_t* buf_;
-    uint8_t* next_;
-    uint8_t* limit_;
 };
 
-class XdrSizer: public XdrSink
+class XdrSizer: public XdrMemory
 {
 public:
+    XdrSizer()
+	: XdrMemory(1024)
+    {
+    }
+
     size_t size() const
     {
-	return size_;
+	return size_ + writePos();
     }
 
     // XdrSink overrides
-    void putWord(uint32_t v) override
+    void flush() override
     {
-	size_ += sizeof(v);
-    }
-
-    void putBytes(const uint8_t* p, size_t len) override
-    {
-	size_ += __round(len);
+	size_ += writePos();
+	rewind();
     }
 
 private:

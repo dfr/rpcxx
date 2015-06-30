@@ -192,9 +192,9 @@ DatagramConnection::onReadable(ConnectionRegistry*)
     auto bytes = ::read(sock_, receivebuf_.data(), bufferSize_);
     if (bytes < 0)
 	return false;
-    dec_->setSize(bytes);
+    dec_->setReadSize(bytes);
     if (svcreg_->process(dec_.get(), enc_.get()))
-	if (::write(sock_, sendbuf_.data(), enc_->pos()) < 0)
+	if (::write(sock_, sendbuf_.data(), enc_->writePos()) < 0)
 	    return false;
     return true;
 }

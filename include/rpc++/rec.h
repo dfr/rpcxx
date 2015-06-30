@@ -17,8 +17,7 @@ public:
     void pushRecord();
 
     // XdrSink overrides
-    virtual void putWord(uint32_t v) override;
-    virtual void putBytes(const uint8_t* p, size_t len) override;
+    void flush() override;
 
 private:
     void checkSpace(size_t len);
@@ -29,8 +28,6 @@ private:
 
 private:
     std::vector<uint8_t> buf_;
-    uint8_t* next_;
-    uint8_t* limit_;
     std::function<ptrdiff_t(const void*, size_t)> flush_;
 };
 
@@ -48,20 +45,16 @@ public:
     void endRecord();
 
     // XdrSource overrides
-    virtual void getWord(uint32_t& v) override;
-    virtual void getBytes(uint8_t* p, size_t len) override;
+    void fill() override;
 
 private:
-    void fill();
-
     void need(size_t sz);
 
 private:
     std::vector<uint8_t> buf_;
-    uint8_t* next_;
-    uint8_t* limit_;
-    uint8_t* fragLimit_;
+    uint8_t* bufferLimit_;
     std::function<ptrdiff_t(void*, size_t)> fill_;
+    size_t fragBuffered_;
     size_t fragRemaining_;
     bool lastFragment_;
 };

@@ -36,12 +36,13 @@ public:
 	fill_n(buf, sizeof buf, 99);
 	auto xdrmem = make_unique<XdrMemory>(buf, sizeof buf);
 	xdr(a, static_cast<XdrSink*>(xdrmem.get()));
+	EXPECT_EQ(xdrmem->writePos(), N);
 
 	xdrmem->rewind();
 	T b;
 	xdr(b, static_cast<XdrSource*>(xdrmem.get()));
 	compare(a, b);
-	EXPECT_EQ(xdrmem->pos(), N);
+	EXPECT_EQ(xdrmem->readPos(), N);
 	for (auto i = 0; i < N; i++)
 	    EXPECT_EQ(buf[i], x[i]);
     }
@@ -136,6 +137,13 @@ TEST_F(XdrTest, Sizeof)
     EXPECT_EQ(20, XdrSizeof(vector<int>{1, 2, 3, 4}));
     EXPECT_EQ(8, XdrSizeof(array<uint8_t, 7>{0}));
     EXPECT_EQ(12, XdrSizeof(string("Hello")));
+}
+
+TEST_F(XdrTest, Inline)
+{
+    auto xdrs = make_unique<XdrMemory>(100);
+    EXPECT_NE(nullptr, xdrs->writeInline<char>(100));
+    EXPECT_EQ(100, xdrs->writePos());
 }
 
 }

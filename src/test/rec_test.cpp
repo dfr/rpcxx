@@ -160,4 +160,3 @@ TEST_F(RecTest, ArrayPadding)
     xdrs->skipRecord();
     EXPECT_EQ(queue.size(), 0);
 }
-

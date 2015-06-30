@@ -20,25 +20,25 @@ public:
 
     /// Call a simple echo service with the given procedure number
     void simpleCall(
-	shared_ptr<Channel> chan, shared_ptr<Client> client, uint32_t proc)
+        shared_ptr<Channel> chan, shared_ptr<Client> client, uint32_t proc)
     {
-	chan->call(
-	    client.get(), proc,
-	    [](XdrSink* xdrs) {
-		uint32_t v = 123; xdr(v, xdrs); },
-	    [](XdrSource* xdrs) {
-		uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
+        chan->call(
+            client.get(), proc,
+            [](XdrSink* xdrs) {
+                uint32_t v = 123; xdr(v, xdrs); },
+            [](XdrSource* xdrs) {
+                uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
     }
 
     thread callMany(
-	shared_ptr<Channel> chan, uint32_t proc, int iterations)
+        shared_ptr<Channel> chan, uint32_t proc, int iterations)
     {
-	return thread(
-	    [=]() {
-		for (int i = 0; i < iterations; i++) {
-		    simpleCall(chan, client, 1);
-		}
-	    });
+        return thread(
+            [=]() {
+                for (int i = 0; i < iterations; i++) {
+                    simpleCall(chan, client, 1);
+                }
+            });
     }
 
     shared_ptr<Client> client;
@@ -51,266 +51,266 @@ public:
     /// 2 is a stop request. Note, we ignore most of the
     /// RPC protocol for simplicity
     GssServer(int sock)
-	: sock_(sock)
+        : sock_(sock)
     {
-	dec_ = std::make_unique<RecordReader>(
-	    1500,
-	    [=](void* buf, size_t len) {
-		auto bytes = ::read(sock_, buf, len);
-		if (bytes < 0)
-		    throw std::system_error(
-			errno, std::system_category());
-		return bytes;
-	    });
-	enc_ = std::make_unique<RecordWriter>(
-	    1500,
-	    [=](const void* buf, size_t len) {
-		const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
-		size_t n = len;
-		while (n > 0) {
-		    auto bytes = ::write(sock_, p, len);
-		    if (bytes < 0)
-			throw std::system_error(
-			    errno, std::system_category());
-		    p += bytes;
-		    n -= bytes;
-		}
-		return len;
-	    });
-	start();
+        dec_ = std::make_unique<RecordReader>(
+            1500,
+            [=](void* buf, size_t len) {
+                auto bytes = ::read(sock_, buf, len);
+                if (bytes < 0)
+                    throw std::system_error(
+                        errno, std::system_category());
+                return bytes;
+            });
+        enc_ = std::make_unique<RecordWriter>(
+            1500,
+            [=](const void* buf, size_t len) {
+                const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
+                size_t n = len;
+                while (n > 0) {
+                    auto bytes = ::write(sock_, p, len);
+                    if (bytes < 0)
+                        throw std::system_error(
+                            errno, std::system_category());
+                    p += bytes;
+                    n -= bytes;
+                }
+                return len;
+            });
+        start();
     }
 
     void start()
     {
-	thread_ = thread(
-	    [=]() {
-		auto buf = std::make_unique<XdrMemory>(1500);
+        thread_ = thread(
+            [=]() {
+                auto buf = std::make_unique<XdrMemory>(1500);
 
-		bool stopping = false;
-		while (!stopping) {
-		    rpc_msg call_msg;
-		    uint32_t val;
-		    rpc_gss_cred_vers_1_t cred;
-		    vector<uint8_t> token;
+                bool stopping = false;
+                while (!stopping) {
+                    rpc_msg call_msg;
+                    uint32_t val;
+                    rpc_gss_cred_vers_1_t cred;
+                    vector<uint8_t> token;
 
-		    try {
-			xdr(call_msg, dec_.get());
-			auto& cbody = call_msg.cbody();
-			if (cbody.cred.flavor == RPCSEC_GSS) {
-			    XdrMemory xdrcred(
-				cbody.cred.auth_body.data(),
-				cbody.cred.auth_body.size());
-			    xdr(cred, static_cast<XdrSource*>(&xdrcred));
-			}
-			bool ok = true;
-			if (cbody.proc == 0 &&
-			    cred.gss_proc != RPCSEC_GSS_DATA) {
-			    xdr(token, dec_.get());
-			}
-			else {
-			    if (cbody.proc == 1)
-				ok = decodeBody(
-				    context_, mechType_,
-				    cred.service, cred.seq_num,
-				    [&val](XdrSource* xdrs) {
-					xdr(val, xdrs);
-				    },
-				    dec_.get());
-			    else
-				ok = decodeBody(
-				    context_, mechType_,
-				    cred.service, cred.seq_num,
-				    [](XdrSource* xdrs) { },
-				    dec_.get());
-			}
-			dec_->endRecord();
-			if (!ok) {
-			    accepted_reply ar;
-			    generateVerifier(cred.seq_num, ar.verf);
-			    ar.stat = GARBAGE_ARGS;
-			    rpc_msg reply_msg(
-				call_msg.xid, reply_body(std::move(ar)));
-			    xdr(reply_msg, enc_.get());
-			    enc_->pushRecord();
-			    continue;
-			}
+                    try {
+                        xdr(call_msg, dec_.get());
+                        auto& cbody = call_msg.cbody();
+                        if (cbody.cred.flavor == RPCSEC_GSS) {
+                            XdrMemory xdrcred(
+                                cbody.cred.auth_body.data(),
+                                cbody.cred.auth_body.size());
+                            xdr(cred, static_cast<XdrSource*>(&xdrcred));
+                        }
+                        bool ok = true;
+                        if (cbody.proc == 0 &&
+                            cred.gss_proc != RPCSEC_GSS_DATA) {
+                            xdr(token, dec_.get());
+                        }
+                        else {
+                            if (cbody.proc == 1)
+                                ok = decodeBody(
+                                    context_, mechType_,
+                                    cred.service, cred.seq_num,
+                                    [&val](XdrSource* xdrs) {
+                                        xdr(val, xdrs);
+                                    },
+                                    dec_.get());
+                            else
+                                ok = decodeBody(
+                                    context_, mechType_,
+                                    cred.service, cred.seq_num,
+                                    [](XdrSource* xdrs) { },
+                                    dec_.get());
+                        }
+                        dec_->endRecord();
+                        if (!ok) {
+                            accepted_reply ar;
+                            generateVerifier(cred.seq_num, ar.verf);
+                            ar.stat = GARBAGE_ARGS;
+                            rpc_msg reply_msg(
+                                call_msg.xid, reply_body(std::move(ar)));
+                            xdr(reply_msg, enc_.get());
+                            enc_->pushRecord();
+                            continue;
+                        }
 
-			if (cbody.proc == 0 &&
-			    cred.gss_proc != RPCSEC_GSS_DATA) {
-			    controlMessage(call_msg.xid, cred, token);
-			    continue;
-			}
+                        if (cbody.proc == 0 &&
+                            cred.gss_proc != RPCSEC_GSS_DATA) {
+                            controlMessage(call_msg.xid, cred, token);
+                            continue;
+                        }
 
-			// Verify call mic
-			if (cbody.verf.flavor != RPCSEC_GSS) {
-			    rejected_reply rr;
-			    rr.stat = AUTH_ERROR;
-			    rr.auth_error = AUTH_BADVERF;
-			    rpc_msg reply_msg(
-				call_msg.xid, reply_body(std::move(rr)));
-			    xdr(reply_msg, enc_.get());
-			    enc_->pushRecord();
-			    continue;
-			}
+                        // Verify call mic
+                        if (cbody.verf.flavor != RPCSEC_GSS) {
+                            rejected_reply rr;
+                            rr.stat = AUTH_ERROR;
+                            rr.auth_error = AUTH_BADVERF;
+                            rpc_msg reply_msg(
+                                call_msg.xid, reply_body(std::move(rr)));
+                            xdr(reply_msg, enc_.get());
+                            enc_->pushRecord();
+                            continue;
+                        }
 
-			if (!verifyCall(call_msg))
-			    continue;
+                        if (!verifyCall(call_msg))
+                            continue;
 
-			accepted_reply ar;
-			generateVerifier(cred.seq_num, ar.verf);
-			ar.stat = SUCCESS;
-			rpc_msg reply_msg(
-			    call_msg.xid, reply_body(std::move(ar)));
+                        accepted_reply ar;
+                        generateVerifier(cred.seq_num, ar.verf);
+                        ar.stat = SUCCESS;
+                        rpc_msg reply_msg(
+                            call_msg.xid, reply_body(std::move(ar)));
 
-			xdr(reply_msg, enc_.get());
+                        xdr(reply_msg, enc_.get());
 
-			if (cbody.proc == 1)
-			    encodeBody(
-				context_, mechType_,
-				cred.service, cred.seq_num,
-				[&val](XdrSink* xdrs) {
-				    xdr(val, xdrs);
-				},
-				enc_.get());
-			else
-			    encodeBody(
-				context_, mechType_,
-				cred.service, cred.seq_num,
-				[](XdrSink* xdrs) { },
-				enc_.get());
-			enc_->pushRecord();
+                        if (cbody.proc == 1)
+                            encodeBody(
+                                context_, mechType_,
+                                cred.service, cred.seq_num,
+                                [&val](XdrSink* xdrs) {
+                                    xdr(val, xdrs);
+                                },
+                                enc_.get());
+                        else
+                            encodeBody(
+                                context_, mechType_,
+                                cred.service, cred.seq_num,
+                                [](XdrSink* xdrs) { },
+                                enc_.get());
+                        enc_->pushRecord();
 
-			if (cbody.proc == 2)
-			    stopping = true;
-		    }
-		    catch (XdrError& e) {
-			break;
-		    }
-		}
-		uint32_t min_stat;
-		if (context_)
-		    gss_delete_sec_context(
-			&min_stat, &context_, GSS_C_NO_BUFFER);
-		if (clientName_)
-		    gss_release_name(&min_stat, &clientName_);
-	    });
+                        if (cbody.proc == 2)
+                            stopping = true;
+                    }
+                    catch (XdrError& e) {
+                        break;
+                    }
+                }
+                uint32_t min_stat;
+                if (context_)
+                    gss_delete_sec_context(
+                        &min_stat, &context_, GSS_C_NO_BUFFER);
+                if (clientName_)
+                    gss_release_name(&min_stat, &clientName_);
+            });
     }
 
     ~GssServer()
     {
-	thread_.join();
+        thread_.join();
     }
 
     void controlMessage(
-	uint32_t xid,
-	rpc_gss_cred_vers_1_t& cred,
-	vector<uint8_t>& token)
+        uint32_t xid,
+        rpc_gss_cred_vers_1_t& cred,
+        vector<uint8_t>& token)
     {
-	uint32_t maj_stat, min_stat;
+        uint32_t maj_stat, min_stat;
 
-	assert(cred.gss_proc != RPCSEC_GSS_DESTROY);
-	gss_buffer_desc inputToken { token.size(), token.data() };
-	gss_buffer_desc outputToken { 0, nullptr };
-	maj_stat = gss_accept_sec_context(
-	    &min_stat,
-	    &context_,
-	    GSS_C_NO_CREDENTIAL,
-	    &inputToken,
-	    GSS_C_NO_CHANNEL_BINDINGS,
-	    &clientName_,
-	    &mechType_,
-	    &outputToken,
-	    nullptr, nullptr, nullptr);
-	if (GSS_ERROR(maj_stat)) {
-	    reportError(mechType_, maj_stat, min_stat);
-	}
+        assert(cred.gss_proc != RPCSEC_GSS_DESTROY);
+        gss_buffer_desc inputToken { token.size(), token.data() };
+        gss_buffer_desc outputToken { 0, nullptr };
+        maj_stat = gss_accept_sec_context(
+            &min_stat,
+            &context_,
+            GSS_C_NO_CREDENTIAL,
+            &inputToken,
+            GSS_C_NO_CHANNEL_BINDINGS,
+            &clientName_,
+            &mechType_,
+            &outputToken,
+            nullptr, nullptr, nullptr);
+        if (GSS_ERROR(maj_stat)) {
+            reportError(mechType_, maj_stat, min_stat);
+        }
 
-	rpc_gss_init_res res;
-	res.handle = { 1, 0, 0, 0 };
-	res.gss_major = maj_stat;
-	res.gss_minor = min_stat;
-	res.seq_window = 1;
-	res.gss_token.resize(outputToken.length);
-	copy_n(static_cast<uint8_t*>(outputToken.value),
-	       outputToken.length, res.gss_token.begin());
-	gss_release_buffer(&min_stat, &outputToken);
+        rpc_gss_init_res res;
+        res.handle = { 1, 0, 0, 0 };
+        res.gss_major = maj_stat;
+        res.gss_minor = min_stat;
+        res.seq_window = 1;
+        res.gss_token.resize(outputToken.length);
+        copy_n(static_cast<uint8_t*>(outputToken.value),
+               outputToken.length, res.gss_token.begin());
+        gss_release_buffer(&min_stat, &outputToken);
 
-	accepted_reply ar;
-	if (maj_stat == GSS_S_COMPLETE) {
-	    XdrWord seq(res.seq_window);
-	    gss_buffer_desc message{ sizeof(uint32_t), seq.data() };
-	    gss_buffer_desc mic{ 0, nullptr };
-	    gss_get_mic(
-		&min_stat, context_, GSS_C_QOP_DEFAULT, &message, &mic);
-	    ar.verf.flavor = RPCSEC_GSS;
-	    ar.verf.auth_body.resize(mic.length);
-	    copy_n(static_cast<uint8_t*>(mic.value), mic.length,
-		   ar.verf.auth_body.begin());
-	    gss_release_buffer(&min_stat, &mic);
-	}
-	else {
-	    ar.verf = { AUTH_NONE, {} };
-	}
-	ar.stat = SUCCESS;
-	rpc_msg reply_msg(xid, reply_body(std::move(ar)));
-	xdr(reply_msg, enc_.get());
-	xdr(res, enc_.get());
-	enc_->pushRecord();
+        accepted_reply ar;
+        if (maj_stat == GSS_S_COMPLETE) {
+            XdrWord seq(res.seq_window);
+            gss_buffer_desc message{ sizeof(uint32_t), seq.data() };
+            gss_buffer_desc mic{ 0, nullptr };
+            gss_get_mic(
+                &min_stat, context_, GSS_C_QOP_DEFAULT, &message, &mic);
+            ar.verf.flavor = RPCSEC_GSS;
+            ar.verf.auth_body.resize(mic.length);
+            copy_n(static_cast<uint8_t*>(mic.value), mic.length,
+                   ar.verf.auth_body.begin());
+            gss_release_buffer(&min_stat, &mic);
+        }
+        else {
+            ar.verf = { AUTH_NONE, {} };
+        }
+        ar.stat = SUCCESS;
+        rpc_msg reply_msg(xid, reply_body(std::move(ar)));
+        xdr(reply_msg, enc_.get());
+        xdr(res, enc_.get());
+        enc_->pushRecord();
     }
 
     bool verifyCall(const rpc_msg& call_msg)
     {
-	auto cbody = call_msg.cbody();
-	auto xdrcall = make_unique<XdrMemory>(512);
-	auto xdrs = static_cast<XdrSink*>(xdrcall.get());
-	xdr(call_msg.xid, xdrs);
-	xdr(call_msg.mtype, xdrs);
-	xdr(cbody.rpcvers, xdrs);
-	xdr(cbody.prog, xdrs);
-	xdr(cbody.vers, xdrs);
-	xdr(cbody.proc, xdrs);
-	xdr(cbody.cred, xdrs);
-	gss_buffer_desc buf {
-	    xdrcall->pos(), xdrcall->buf() };
-	gss_buffer_desc mic {
-	    cbody.verf.auth_body.size(),
-		cbody.verf.auth_body.data() };
-	uint32_t maj_stat, min_stat;
-	maj_stat = gss_verify_mic(
-	    &min_stat, context_, &buf, &mic, nullptr);
-	if (GSS_ERROR(maj_stat)) {
-	    rejected_reply rr;
-	    rr.stat = AUTH_ERROR;
-	    rr.auth_error = RPCSEC_GSS_CREDPROBLEM;
-	    rpc_msg reply_msg(
-		call_msg.xid, reply_body(std::move(rr)));
-	    xdr(reply_msg, enc_.get());
-	    enc_->pushRecord();
-	    return false;
-	}
-	return true;
+        auto cbody = call_msg.cbody();
+        auto xdrcall = make_unique<XdrMemory>(512);
+        auto xdrs = static_cast<XdrSink*>(xdrcall.get());
+        xdr(call_msg.xid, xdrs);
+        xdr(call_msg.mtype, xdrs);
+        xdr(cbody.rpcvers, xdrs);
+        xdr(cbody.prog, xdrs);
+        xdr(cbody.vers, xdrs);
+        xdr(cbody.proc, xdrs);
+        xdr(cbody.cred, xdrs);
+        gss_buffer_desc buf {
+            xdrcall->writePos(), xdrcall->buf() };
+        gss_buffer_desc mic {
+            cbody.verf.auth_body.size(),
+                cbody.verf.auth_body.data() };
+        uint32_t maj_stat, min_stat;
+        maj_stat = gss_verify_mic(
+            &min_stat, context_, &buf, &mic, nullptr);
+        if (GSS_ERROR(maj_stat)) {
+            rejected_reply rr;
+            rr.stat = AUTH_ERROR;
+            rr.auth_error = RPCSEC_GSS_CREDPROBLEM;
+            rpc_msg reply_msg(
+                call_msg.xid, reply_body(std::move(rr)));
+            xdr(reply_msg, enc_.get());
+            enc_->pushRecord();
+            return false;
+        }
+        return true;
     }
 
     void generateVerifier(uint32_t seq, opaque_auth& verf)
     {
-	XdrWord seqbuf(seq);
-	gss_buffer_desc buf { sizeof(seqbuf), &seqbuf };
-	gss_buffer_desc mic;
-	uint32_t maj_stat, min_stat;
-	maj_stat = gss_get_mic(
-	    &min_stat, context_, GSS_C_QOP_DEFAULT, &buf, &mic);
-	verf.flavor = RPCSEC_GSS;
-	verf.auth_body.resize(mic.length);
-	copy_n(
-	    static_cast<uint8_t*>(mic.value), mic.length,
-	    verf.auth_body.begin());
-	gss_release_buffer(&min_stat, &mic);
+        XdrWord seqbuf(seq);
+        gss_buffer_desc buf { sizeof(seqbuf), &seqbuf };
+        gss_buffer_desc mic;
+        uint32_t maj_stat, min_stat;
+        maj_stat = gss_get_mic(
+            &min_stat, context_, GSS_C_QOP_DEFAULT, &buf, &mic);
+        verf.flavor = RPCSEC_GSS;
+        verf.auth_body.resize(mic.length);
+        copy_n(
+            static_cast<uint8_t*>(mic.value), mic.length,
+            verf.auth_body.begin());
+        gss_release_buffer(&min_stat, &mic);
     }
 
     void stop(shared_ptr<Channel> chan, shared_ptr<Client> client)
-    { 
-	chan->call(
-	    client.get(), 2, [](XdrSink* xdrs) {}, [](XdrSource* xdrs) {});
+    {
+        chan->call(
+            client.get(), 2, [](XdrSink* xdrs) {}, [](XdrSource* xdrs) {});
     }
 
     thread thread_;
@@ -327,33 +327,32 @@ TEST_F(GssTest, Init)
     ::setenv("KRB5_KTNAME", "test.keytab", true);
 
     for (int service = rpcsec_gss_svc_none;
-	 service <= rpcsec_gss_svc_privacy; ++service) {
-	int sockpair[2];
-	ASSERT_GE(::socketpair(AF_LOCAL, SOCK_STREAM, 0, sockpair), 0);
+         service <= rpcsec_gss_svc_privacy; ++service) {
+        int sockpair[2];
+        ASSERT_GE(::socketpair(AF_LOCAL, SOCK_STREAM, 0, sockpair), 0);
 
-	int ssock = sockpair[0];
-	int clsock = sockpair[1];
+        int ssock = sockpair[0];
+        int clsock = sockpair[1];
 
-	GssServer server(ssock);
+        GssServer server(ssock);
 
-	// Make a client using RPCSEC_GSS authentication. We assume
-	// that there is a host/<gethostname>@DOMAIN entry in the
-	// local keytab
-	char hbuf[512];
-	::gethostname(hbuf, sizeof(hbuf));
-	string principal = "host@";
-	principal += hbuf;
-	client = make_shared<GssClient>(
-	    1234, 1, principal, "krb5", rpc_gss_service_t(service));
+        // Make a client using RPCSEC_GSS authentication. We assume
+        // that there is a host/<gethostname>@DOMAIN entry in the
+        // local keytab
+        char hbuf[512];
+        ::gethostname(hbuf, sizeof(hbuf));
+        string principal = "host@";
+        principal += hbuf;
+        client = make_shared<GssClient>(
+            1234, 1, principal, "krb5", rpc_gss_service_t(service));
 
-	// Send a message and check the reply
-	auto chan = make_shared<StreamChannel>(clsock);
-	simpleCall(chan, client, 1);
+        // Send a message and check the reply
+        auto chan = make_shared<StreamChannel>(clsock);
+        simpleCall(chan, client, 1);
 
-	// Ask the server to stop running
-	server.stop(chan, client);
+        // Ask the server to stop running
+        server.stop(chan, client);
     }
 }
 
 }
-

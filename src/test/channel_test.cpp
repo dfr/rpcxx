@@ -147,9 +147,9 @@ public:
     void endReply() override
     {
 	auto bytes = ::sendto(
-	    sock_, buf_->buf(), buf_->pos(), 0,
+	    sock_, buf_->buf(), buf_->writePos(), 0,
 	    reinterpret_cast<const sockaddr*>(&addr_), addrlen_);
-	ASSERT_EQ(buf_->pos(), bytes);
+	ASSERT_EQ(buf_->writePos(), bytes);
     }
 
     int sock_;
