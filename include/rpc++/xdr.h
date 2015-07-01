@@ -87,7 +87,7 @@ class XdrSink
 public:
     ~XdrSink() {}
 
-    /// Write a 32-bit word to the stream
+    /// Write a 32-bit word to the stream in network byte order
     void putWord(const uint32_t v)
     {
         if (writeCursor_ + sizeof(v) > writeLimit_)
@@ -129,7 +129,7 @@ public:
         putBytes(static_cast<const uint8_t*>(p), len);
     }
 
-    /// If there is at least len bytes of space in the write buffer,
+    /// If there are at least len bytes of space in the write buffer,
     /// return a pointer to the next free byte and advance the write
     /// cursor by len bytes. If not, return nullptr. Len must be a
     /// multiple of sizeof(XdrWord).
@@ -203,6 +203,22 @@ public:
         getBytes(static_cast<uint8_t*>(p), len);
     }
 
+    /// If there are at least len bytes of space in the read buffer,
+    /// return a pointer to the next free byte and advance the read
+    /// cursor by len bytes. If not, return nullptr. Len must be a
+    /// multiple of sizeof(XdrWord).
+    template <typename T>
+    const T* readInline(size_t len)
+    {
+        assert(len == __round(len));
+        const T* p = nullptr;
+        if (readCursor_ + len <= readLimit_) {
+            p = reinterpret_cast<const T*>(readCursor_);
+            readCursor_ += len;
+        }
+        return p;
+    }
+
     virtual void fill() = 0;
 
 protected:
@@ -229,50 +245,100 @@ inline void xdr(uint32_t& v, XdrSource* xdrs)
 inline void
 xdr(const uint64_t v, XdrSink* xdrs)
 {
-    xdrs->putWord(static_cast<uint32_t>(v >> 32));
-    xdrs->putWord(static_cast<uint32_t>(v));
+    auto p = xdrs->writeInline<XdrWord>(2 * sizeof(XdrWord));
+    if (p) {
+        *p++ = static_cast<uint32_t>(v >> 32);
+        *p++ = static_cast<uint32_t>(v);
+    }
+    else {
+        xdrs->putWord(static_cast<uint32_t>(v >> 32));
+        xdrs->putWord(static_cast<uint32_t>(v));
+    }
 }
 
 inline void xdr(uint64_t& v, XdrSource* xdrs)
 {
     uint32_t v0, v1;
-    xdrs->getWord(v0);
-    xdrs->getWord(v1);
+    auto p = xdrs->readInline<XdrWord>(2 * sizeof(XdrWord));
+    if (p) {
+        v0 = *p++;
+        v1 = *p++;
+    }
+    else {
+        xdrs->getWord(v0);
+        xdrs->getWord(v1);
+    }
     v = (static_cast<uint64_t>(v0) << 32) | v1;
 }
 
 template <size_t N>
 inline void xdr(const std::array<uint8_t, N>& v, XdrSink* xdrs)
 {
-    xdrs->putBytes(v.data(), v.size());
+    auto p = xdrs->writeInline<uint8_t>(__round(N));
+    if (p) {
+        std::copy_n(v.data(), N, p);
+        if (__round(N) != N)
+            std::fill_n(p + N, __round(N) - N, 0);
+    }
+    else {
+        xdrs->putBytes(v.data(), N);
+    }
 }
 
 template <size_t N>
 inline void xdr(std::array<uint8_t, N>& v, XdrSource* xdrs)
 {
-    xdrs->getBytes(v.data(), v.size());
+    auto p = xdrs->readInline<uint8_t>(__round(N));
+    if (p) {
+        std::copy_n(p, N, v.data());
+    }
+    else {
+        xdrs->getBytes(v.data(), v.size());
+    }
 }
 
 inline void xdr(const std::vector<uint8_t>& v, XdrSink* xdrs)
 {
-    xdrs->putWord(v.size());
-    xdrs->putBytes(v.data(), v.size());
+    auto len = v.size();
+    auto p = xdrs->writeInline<uint8_t>(sizeof(XdrWord) + __round(len));
+    if (p) {
+        *reinterpret_cast<XdrWord*>(p) = len;
+        p += sizeof(XdrWord);
+        std::copy_n(v.data(), len, p);
+        if (__round(len) != len)
+            std::fill_n(p + len, __round(len) - len, 0);
+    }
+    else {
+        xdrs->putWord(len);
+        xdrs->putBytes(v.data(), len);
+    }
 }
 
 inline void xdr(std::vector<uint8_t>& v, XdrSource* xdrs)
 {
     uint32_t len;
-    xdrs->getWord(len);
-    v.resize(len);
-    xdrs->getBytes(v.data(), v.size());
+    auto lenp = xdrs->readInline<XdrWord>(sizeof(XdrWord));
+    if (lenp) {
+        len = *lenp;
+        auto p = xdrs->readInline<uint8_t>(__round(len));
+        v.resize(len);
+        if (p)
+            std::copy_n(p, len, v.data());
+        else
+            xdrs->getBytes(v.data(), len);
+    }
+    else {
+        xdrs->getWord(len);
+        v.resize(len);
+        xdrs->getBytes(v.data(), len);
+    }
 }
 
 template <size_t N>
 inline void xdr(const bounded_vector<uint8_t, N>& v, XdrSink* xdrs)
 {
     assert(v.size() <= N);
-    xdrs->putWord(v.size());
-    xdrs->putBytes(v.data(), v.size());
+    xdr(static_cast<const std::vector<uint8_t>&>(v), xdrs);
 }
 
 template <size_t N>
@@ -283,29 +349,57 @@ inline void xdr(bounded_vector<uint8_t, N>& v, XdrSource* xdrs)
     if (len > N)
         throw XdrError("array overflow");
     v.resize(len);
-    xdrs->getBytes(v.data(), v.size());
+    auto p = xdrs->readInline<uint8_t>(__round(len));
+    if (p) {
+        std::copy_n(p, len, v.data());
+    }
+    else {
+        xdrs->getBytes(v.data(), v.size());
+    }
 }
 
 inline void xdr(const std::string& v, XdrSink* xdrs)
 {
-    xdrs->putWord(v.size());
-    xdrs->putBytes(reinterpret_cast<const uint8_t*>(v.data()), v.size());
+    auto len = v.size();
+    auto p = xdrs->writeInline<uint8_t>(sizeof(XdrWord) + __round(len));
+    if (p) {
+        *reinterpret_cast<XdrWord*>(p) = len;
+        p += sizeof(XdrWord);
+        std::copy_n(reinterpret_cast<const uint8_t*>(v.data()), len, p);
+        if (__round(len) != len)
+            std::fill_n(p + len, __round(len) - len, 0);
+    }
+    else {
+        xdrs->putWord(len);
+        xdrs->putBytes(reinterpret_cast<const uint8_t*>(v.data()), v.size());
+    }
 }
 
 inline void xdr(std::string& v, XdrSource* xdrs)
 {
     uint32_t len;
-    xdrs->getWord(len);
-    v.resize(len);
-    xdrs->getBytes(reinterpret_cast<uint8_t*>(&v[0]), v.size());
+    auto lenp = xdrs->readInline<XdrWord>(sizeof(XdrWord));
+    if (lenp) {
+        len = *lenp;
+        auto p = xdrs->readInline<uint8_t>(__round(len));
+        v.resize(len);
+        if (p)
+            std::copy_n(p, len, reinterpret_cast<uint8_t*>(&v[0]));
+        else
+            xdrs->getBytes(reinterpret_cast<uint8_t*>(&v[0]), v.size());
+    }
+    else {
+        xdrs->getWord(len);
+        v.resize(len);
+        xdrs->getBytes(reinterpret_cast<uint8_t*>(&v[0]), v.size());
+    }
 }
 
 template <size_t N>
 inline void xdr(const bounded_string<N>& v, XdrSink* xdrs)
 {
     assert(v.size() <= N);
-    xdrs->putWord(v.size());
-    xdrs->putBytes(reinterpret_cast<const uint8_t*>(v.data()), v.size());
+    xdr(static_cast<const std::string&>(v), xdrs);
 }
 
 template <size_t N>
@@ -316,7 +410,13 @@ inline void xdr(bounded_string<N>& v, XdrSource* xdrs)
     if (len > N)
         throw XdrError("string overflow");
     v.resize(len);
-    xdrs->getBytes(reinterpret_cast<uint8_t*>(&v[0]), v.size());
+    auto p = xdrs->readInline<uint8_t>(__round(len));
+    if (p) {
+        std::copy_n(p, len, reinterpret_cast<uint8_t*>(&v[0]));
+    }
+    else {
+        xdrs->getBytes(reinterpret_cast<uint8_t*>(&v[0]), v.size());
+    }
 }
 
 inline void xdr(const int v, XdrSink* xdrs)
@@ -503,7 +603,7 @@ public:
     {
         return size_;
     }
-    
+
     size_t writePos() const
     {
         return writeCursor_ - buf_;
@@ -559,4 +659,3 @@ size_t XdrSizeof(const T& v)
 }
 
 }
-

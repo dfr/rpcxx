@@ -10,7 +10,6 @@ using namespace oncrpc;
 using namespace oncrpc::_gssdetail;
 using namespace std;
 
-
 GssClient::GssClient(
     uint32_t program, uint32_t version,
     const string& principal,

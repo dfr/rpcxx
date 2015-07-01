@@ -144,7 +144,8 @@ TEST_F(XdrTest, Inline)
     auto xdrs = make_unique<XdrMemory>(100);
     EXPECT_NE(nullptr, xdrs->writeInline<char>(100));
     EXPECT_EQ(100, xdrs->writePos());
+    EXPECT_NE(nullptr, xdrs->readInline<char>(100));
+    EXPECT_EQ(100, xdrs->readPos());
 }
 
 }
-
