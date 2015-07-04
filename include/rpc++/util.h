@@ -3,10 +3,8 @@
 #pragma once
 
 #include <string>
-#include <vector>
 
-#include <netdb.h>
-#include <sys/socket.h>
+#include <rpc++/socket.h>
 
 namespace oncrpc {
 
@@ -26,27 +24,8 @@ public:
     }
 };
 
-/// Similar to struct addrinfo but with C++ semantics for allocation
-struct AddressInfo
-{
-    AddressInfo(addrinfo* ai);
-
-    int flags;
-    int family;
-    int socktype;
-    int protocol;
-    int addrlen;
-    sockaddr* addr;
-    std::string canonname;
-    sockaddr_storage storage;
-};
-
 std::unique_ptr<AddressInfo> uaddr2taddr(
     const std::string& uaddr, const std::string& nettype);
-
-std::vector<AddressInfo> getAddressInfo(
-    const std::string& host, const std::string& service, 
-    const std::string& nettype);
 
 int connectSocket(
     const std::string& host, const std::string& service,
@@ -63,4 +42,3 @@ std::shared_ptr<Channel> connectChannel(
     const std::string& nettype);
 
 }
-

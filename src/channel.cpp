@@ -119,6 +119,12 @@ Channel::Channel()
     retransmitInterval_ = std::chrono::seconds(1);
 }
 
+Channel::Channel(std::shared_ptr<ServiceRegistry> svcreg)
+    : Channel()
+{
+    svcreg_ = svcreg;
+}
+
 Channel::~Channel()
 {
     assert(pending_.size() == 0);
@@ -144,6 +150,7 @@ call_again:
             << " xid: " << xid << ": new call";
     auto i = pending_.emplace(xid, std::move(Transaction()));
     auto& tx = i.first->second;
+    tx.xid = xid;
 
     auto now = std::chrono::system_clock::now();
     auto maxTime = now + timeout;
@@ -151,9 +158,9 @@ call_again:
     for (;;) {
         // Drop the lock while we transmit
         lock.unlock();
-        auto xdrout = beginCall();
+        auto xdrout = beginSend();
         tx.seq = client->processCall(xid, proc, xdrout.get(), xargs);
-        endCall(std::move(xdrout));
+        endSend(std::move(xdrout), true);
         lock.lock();
 
         // XXX support oneway
@@ -171,11 +178,14 @@ call_again:
                 if (running_) {
                     // Someone else is reading replies, wait until they wake
                     // us or until we time out.
+                    auto timeoutDuration = retransmitTime - now;
                     VLOG(3) << "thread: " << std::this_thread::get_id()
                             << " xid: " << xid
-                            << ": waiting for other thread";
+                            << ": waiting for other thread: "
+                            << std::chrono::duration_cast<std::chrono::milliseconds>(timeoutDuration).count()
+                            << "ms";
                     tx.sleeping = true;
-                    auto status = tx.cv->wait_for(lock, retransmitTime - now);
+                    auto status = tx.cv->wait_for(lock, timeoutDuration);
                     tx.sleeping = false;
                     if (status == std::cv_status::no_timeout) {
                         if (!tx.body) {
@@ -184,54 +194,29 @@ call_again:
                             continue;
                         }
                     }
+                    else {
+                        VLOG(3) << "thread: " << std::this_thread::get_id()
+                                << " xid: " << xid
+                                << ": timed out waiting for other thread";
+                        break;
+                    }
                 }
                 else {
                     running_ = true;
                     VLOG(3) << "thread: " << std::this_thread::get_id()
                             << " xid: " << xid
                             << ": waiting for reply";
-                    lock.unlock();
-                    tx.body = beginReply(retransmitTime - now);
-                    lock.lock();
-                    if (tx.body)
-                        xdr(tx.reply, tx.body.get());
+                    auto received = receiveMessage(
+                        tx, lock, retransmitTime - now);
                     running_ = false;
+                    if (!received)
+                        break;
                 }
             }
 
-            // If we timed out or we received a matching reply, we can
-            // stop waiting
-            if (!tx.body || tx.reply.xid == xid) {
+            // If we received a matching reply, we can stop waiting
+            if (tx.body) {
                 break;
-            }
-
-            // This may be some other thread's reply. Find them and
-            // wake them up to process it
-            VLOG(3) << "thread: " << std::this_thread::get_id()
-                    << " xid: " << tx.reply.xid
-                    << ": finding transaction";
-            assert(lock);
-            auto i = pending_.find(tx.reply.xid);
-            if (i != pending_.end()) {
-                VLOG(3) << "thread: " << std::this_thread::get_id()
-                        << " xid: " << tx.reply.xid
-                        << ": waking thread";
-                auto& other = i->second;
-                other.reply = std::move(tx.reply);
-                other.body = std::move(tx.body);
-                other.cv->notify_one();
-            }
-            else {
-                // If we don't find the transaction, just drop
-                // it. This can happen for retransmits.
-                VLOG(3) << "thread: " << std::this_thread::get_id()
-                        << " xid: " << tx.reply.xid
-                        << ": dropping message";
-                tx.reply.xid = 0;
-                auto msg = std::move(tx.body);
-                lock.unlock();
-                endReply(std::move(msg), true);
-                lock.lock();
             }
         }
 
@@ -285,11 +270,11 @@ call_again:
             && reply_msg.rbody().areply().stat == SUCCESS) {
             client->processReply(
                 seq, reply_msg.rbody().areply(), xdrin.get(), xresults);
-            endReply(std::move(xdrin), false);
+            endReceive(std::move(xdrin), false);
             break;
         }
         else {
-            endReply(std::move(xdrin), false);
+            endReceive(std::move(xdrin), false);
             switch (reply_msg.rbody().stat) {
             case MSG_ACCEPTED: {
                 const auto& areply = reply_msg.rbody().areply();
@@ -347,29 +332,93 @@ call_again:
     }
 }
 
+bool Channel::receiveMessage(
+    Transaction& tx,
+    std::unique_lock<std::mutex>& lock,
+    std::chrono::system_clock::duration timeout)
+{
+    assert(running_);
+    lock.unlock();
+    auto body = beginReceive(timeout);
+    lock.lock();
+    if (!body)
+        return false;
+
+    rpc_msg msg;
+    try {
+        xdr(msg, body.get());
+    }
+    catch (XdrError& e) {
+        goto drop;
+    }
+    if (msg.mtype == REPLY) {
+        if (msg.xid == tx.xid) {
+            tx.reply = std::move(msg);
+            tx.body = std::move(body);
+            return true;
+        }
+        // This may be some other thread's reply. Find them and
+        // wake them up to process it
+        VLOG(3) << "thread: " << std::this_thread::get_id()
+                << " xid: " << tx.reply.xid
+                << ": finding transaction";
+        auto i = pending_.find(msg.xid);
+        if (i != pending_.end()) {
+            auto& other = i->second;
+            other.reply = std::move(msg);
+            other.body = std::move(body);
+            other.cv->notify_one();
+            return true;
+        }
+    }
+    else if (msg.mtype == CALL && svcreg_) {
+        lock.unlock();
+        auto reply = beginSend();
+        bool sendit = svcreg_->process(
+            std::move(msg), body.get(), reply.get());
+        endSend(std::move(reply), sendit);
+        endReceive(std::move(body), false);
+        return true;
+    }
+
+    // If we don't have a matching transaction, drop the message
+    // If we don't find the transaction, just drop
+    // it. This can happen for retransmits.
+    VLOG(3) << "thread: " << std::this_thread::get_id()
+            << " xid: " << msg.xid
+            << ": dropping message";
+drop:
+    lock.unlock();
+    endReceive(std::move(body), true);
+    lock.lock();
+    return true;
+}
+
 LocalChannel::LocalChannel(std::shared_ptr<ServiceRegistry> svcreg)
-    : bufferSize_(1500),        // XXX size
-      svcreg_(svcreg)
+    : Channel(svcreg),
+      bufferSize_(1500)        // XXX size
 {
 }
 
 std::unique_ptr<XdrSink>
-LocalChannel::beginCall()
+LocalChannel::beginSend()
 {
     return std::make_unique<XdrMemory>(bufferSize_);
 }
 
 void
-LocalChannel::endCall(std::unique_ptr<XdrSink>&& tmsg)
+LocalChannel::endSend(std::unique_ptr<XdrSink>&& tmsg, bool sendit)
 {
     std::unique_ptr<XdrMemory> msg(static_cast<XdrMemory*>(tmsg.release()));
     msg->rewind();
-    std::unique_lock<std::mutex> lock(mutex_);
-    queue_.push_back(std::move(msg));
+    if (sendit) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        queue_.push_back(std::move(msg));
+    }
 }
 
 std::unique_ptr<XdrSource>
-LocalChannel::beginReply(std::chrono::system_clock::duration timeout)
+LocalChannel::beginReceive(std::chrono::system_clock::duration timeout)
 {
     std::unique_ptr<XdrMemory> msg;
     {
@@ -385,76 +434,45 @@ LocalChannel::beginReply(std::chrono::system_clock::duration timeout)
 }
 
 void
-LocalChannel::endReply(std::unique_ptr<XdrSource>&& msg, bool skip)
+LocalChannel::endReceive(std::unique_ptr<XdrSource>&& msg, bool skip)
 {
     std::unique_ptr<XdrMemory> p(static_cast<XdrMemory*>(msg.release()));
     p.reset();
 }
 
-void
-LocalChannel::close()
-{
-}
-
 SocketChannel::SocketChannel(int sock)
-    : sock_(sock)
+    : Socket(sock)
 {
 }
 
-SocketChannel::~SocketChannel()
+SocketChannel::SocketChannel(int sock, std::shared_ptr<ServiceRegistry> svcreg)
+    : Channel(svcreg),
+      Socket(sock)
 {
-    close();
 }
 
 bool
-SocketChannel::waitForReadable(std::chrono::system_clock::duration timeout)
+SocketChannel::onReadable(SocketManager* sockman)
 {
-    fd_set rset;
-    FD_ZERO(&rset);
-    FD_SET(sock_, &rset);
-
-    auto us = std::chrono::duration_cast<std::chrono::microseconds>(timeout);
-    struct timeval tv {
-        static_cast<int>(us.count() / 1000000),
-        static_cast<int>(us.count() % 1000000)
-    };
-
-    auto nready = ::select(sock_ + 1, &rset, nullptr, nullptr, &tv);
-    if (nready <= 0)
+    using namespace std::literals::chrono_literals;
+    Transaction nulltx;
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (running_)
+        // Some other thread is reading from the socket
+        return true;
+    running_ = true;
+    try {
+        receiveMessage(nulltx, lock, 0s);
+        running_ = false;
+        return true;
+    }
+    catch (std::system_error& e) {
+        running_ = false;
         return false;
-    return true;
-}
-
-bool
-SocketChannel::isReadable() const
-{
-    fd_set rset;
-    struct timeval tv { 0, 0 };
-
-    FD_ZERO(&rset);
-    FD_SET(sock_, &rset);
-    auto nready = ::select(sock_ + 1, &rset, nullptr, nullptr, &tv);
-    return nready == 1;
-}
-
-bool
-SocketChannel::isWritable() const
-{
-    fd_set wset;
-    struct timeval tv { 0, 0 };
-
-    FD_ZERO(&wset);
-    FD_SET(sock_, &wset);
-    auto nready = ::select(sock_ + 1, nullptr, &wset, nullptr, &tv);
-    return nready == 1;
-}
-
-void
-SocketChannel::close()
-{
-    if (sock_ != -1) {
-        ::close(sock_);
-        sock_ = -1;
+    }
+    catch (XdrError& e) {
+        running_ = false;
+        return false;
     }
 }
 
@@ -465,8 +483,15 @@ DatagramChannel::DatagramChannel(int sock)
 {
 }
 
+DatagramChannel::DatagramChannel(
+    int sock, std::shared_ptr<ServiceRegistry> svcreg)
+    : DatagramChannel(sock)
+{
+    svcreg_ = svcreg;
+}
+
 std::unique_ptr<XdrSink>
-DatagramChannel::beginCall()
+DatagramChannel::beginSend()
 {
     std::unique_lock<std::mutex> lock(mutex_);
     if (xdrs_) {
@@ -480,16 +505,17 @@ DatagramChannel::beginCall()
 }
 
 void
-DatagramChannel::endCall(std::unique_ptr<XdrSink>&& msg)
+DatagramChannel::endSend(std::unique_ptr<XdrSink>&& msg, bool sendit)
 {
     std::unique_ptr<XdrMemory> t(static_cast<XdrMemory*>(msg.release()));
-    ::write(sock_, t->buf(), t->writePos());
+    if (sendit)
+        ::write(fd_, t->buf(), t->writePos());
     std::unique_lock<std::mutex> lock(mutex_);
     xdrs_ = std::move(t);
 }
 
 std::unique_ptr<XdrSource>
-DatagramChannel::beginReply(std::chrono::system_clock::duration timeout)
+DatagramChannel::beginReceive(std::chrono::system_clock::duration timeout)
 {
     if (!waitForReadable(timeout))
         return nullptr;
@@ -503,7 +529,7 @@ DatagramChannel::beginReply(std::chrono::system_clock::duration timeout)
     if (!msg)
         msg = std::make_unique<XdrMemory>(bufferSize_);
 
-    auto bytes = ::read(sock_, msg->buf(), msg->bufferSize());
+    auto bytes = ::read(fd_, msg->buf(), msg->bufferSize());
     if (bytes <= 0) {
         throw std::system_error(errno, std::system_category());
     }
@@ -513,7 +539,7 @@ DatagramChannel::beginReply(std::chrono::system_clock::duration timeout)
 }
 
 void
-DatagramChannel::endReply(std::unique_ptr<XdrSource>&& msg, bool skip)
+DatagramChannel::endReceive(std::unique_ptr<XdrSource>&& msg, bool skip)
 {
     std::unique_lock<std::mutex> lock(mutex_);
     xdrs_.reset(static_cast<XdrMemory*>(msg.release()));
@@ -532,12 +558,19 @@ StreamChannel::StreamChannel(int sock)
 {
 }
 
+StreamChannel::StreamChannel(
+    int sock, std::shared_ptr<ServiceRegistry> svcreg)
+    : StreamChannel(sock)
+{
+    svcreg_ = svcreg;
+}
+
 StreamChannel::~StreamChannel()
 {
 }
 
 std::unique_ptr<XdrSink>
-StreamChannel::beginCall()
+StreamChannel::beginSend()
 {
     std::unique_lock<std::mutex> lock(writeMutex_);
     std::unique_ptr<XdrMemory> msg = std::move(sendbuf_);
@@ -548,13 +581,15 @@ StreamChannel::beginCall()
 }
 
 void
-StreamChannel::endCall(std::unique_ptr<XdrSink>&& tmsg)
+StreamChannel::endSend(std::unique_ptr<XdrSink>&& tmsg, bool sendit)
 {
     std::unique_lock<std::mutex> lock(writeMutex_);
     std::unique_ptr<XdrMemory> msg;
     msg.reset(static_cast<XdrMemory*>(tmsg.release()));
-    sender_->putBytes(msg->buf(), msg->writePos());
-    sender_->pushRecord();
+    if (sendit) {
+        sender_->putBytes(msg->buf(), msg->writePos());
+        sender_->pushRecord();
+    }
     msg->rewind();
     sendbuf_ = std::move(msg);
 }
@@ -567,7 +602,7 @@ readAll(int sock, void* buf, size_t len)
 
     while (n > 0) {
         auto bytes = ::read(sock, p, n);
-        if (bytes < 0)
+        if (bytes <= 0)
             throw std::system_error(errno, std::system_category());
         p += bytes;
         n -= bytes;
@@ -575,7 +610,7 @@ readAll(int sock, void* buf, size_t len)
 }
 
 std::unique_ptr<XdrSource>
-StreamChannel::beginReply(std::chrono::system_clock::duration timeout)
+StreamChannel::beginReceive(std::chrono::system_clock::duration timeout)
 {
     VLOG(3) << "waiting for reply";
     if (!waitForReadable(timeout))
@@ -587,12 +622,14 @@ StreamChannel::beginReply(std::chrono::system_clock::duration timeout)
     size_t total = 0;
     while (!done) {
         uint8_t recbuf[sizeof(uint32_t)];
-        readAll(sock_, recbuf, sizeof(uint32_t));
+        readAll(fd_, recbuf, sizeof(uint32_t));
         uint32_t rec = *reinterpret_cast<const XdrWord*>(recbuf);
         uint32_t reclen = rec & 0x7fffffff;
         done = (rec & (1 << 31)) != 0;
+        VLOG(4) << reclen << " byte record, eor=" << done;
         auto frag = std::make_unique<XdrMemory>(reclen);
-        readAll(sock_, frag->buf(), reclen);
+        readAll(fd_, frag->buf(), reclen);
+        VLOG(4) << "read fragment body";
         fragments.push_back(std::move(frag));
         total += reclen;
     }
@@ -614,7 +651,7 @@ StreamChannel::beginReply(std::chrono::system_clock::duration timeout)
 }
 
 void
-StreamChannel::endReply(std::unique_ptr<XdrSource>&& tmsg, bool skip)
+StreamChannel::endReceive(std::unique_ptr<XdrSource>&& tmsg, bool skip)
 {
     std::unique_ptr<XdrMemory> msg;
     msg.reset(static_cast<XdrMemory*>(tmsg.release()));
@@ -623,17 +660,30 @@ StreamChannel::endReply(std::unique_ptr<XdrSource>&& tmsg, bool skip)
 ptrdiff_t
 StreamChannel::write(const void* buf, size_t len)
 {
-    // This will always be called via endCall with writeMutex_ held.
+    // This will always be called via endSend with writeMutex_ held.
     auto p = reinterpret_cast<const uint8_t*>(buf);
     auto n = len;
 
     VLOG(3) << "writing " << len << " bytes to socket";
     while (n > 0) {
-        auto bytes = ::write(sock_, p, len);
+        auto bytes = ::write(fd_, p, len);
         if (bytes < 0)
             throw std::system_error(errno, std::system_category());
         p += bytes;
         n -= bytes;
     }
     return len;
+}
+
+bool
+ListenSocket::onReadable(SocketManager* sockman)
+{
+    sockaddr_storage ss;
+    socklen_t len = sizeof(ss);
+    auto newsock = ::accept(fd_, reinterpret_cast<sockaddr*>(&ss), &len);
+    if (newsock < 0)
+        throw std::system_error(errno, std::system_category());
+    VLOG(3) << "New connection fd: " << newsock;
+    sockman->add(std::make_shared<StreamChannel>(newsock, svcreg_));
+    return true;
 }

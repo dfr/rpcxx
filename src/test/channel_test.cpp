@@ -63,7 +63,7 @@ public:
 
                 bool stopping = false;
                 while (!stopping) {
-                    auto dec = beginCall();
+                    auto dec = beginSend();
                     rpc_msg call_msg;
                     uint32_t val;
 
@@ -71,18 +71,18 @@ public:
                     auto cbody = call_msg.cbody();
                     if (cbody.proc == 1)
                         xdr(val, dec);
-                    endCall();
+                    endSend();
 
                     accepted_reply ar;
                     ar.verf = { AUTH_NONE, {} };
                     ar.stat = SUCCESS;
                     rpc_msg reply_msg(call_msg.xid, reply_body(std::move(ar)));
 
-                    auto enc = beginReply();
+                    auto enc = beginReceive();
                     xdr(reply_msg, enc);
                     if (cbody.proc == 1)
                         xdr(val, enc);
-                    endReply();
+                    endReceive();
 
                     if (cbody.proc == 2)
                         stopping = true;
@@ -96,15 +96,15 @@ public:
     }
 
     void stop(shared_ptr<Channel> chan, shared_ptr<Client> client)
-    { 
+    {
         chan->call(
             client.get(), 2, [](XdrSink* xdrs) {}, [](XdrSource* xdrs) {});
     }
 
-    virtual XdrSource* beginCall() = 0;
-    virtual void endCall() = 0;
-    virtual XdrSink* beginReply() = 0;
-    virtual void endReply() = 0;
+    virtual XdrSource* beginSend() = 0;
+    virtual void endSend() = 0;
+    virtual XdrSink* beginReceive() = 0;
+    virtual void endReceive() = 0;
 
     thread thread_;
 };
@@ -124,7 +124,7 @@ public:
         ::close(sock_);
     }
 
-    XdrSource* beginCall() override
+    XdrSource* beginSend() override
     {
         buf_->rewind();
         addrlen_ = addr_.sun_len = sizeof(addr_);
@@ -134,17 +134,17 @@ public:
         return buf_.get();
     }
 
-    void endCall() override
+    void endSend() override
     {
     }
 
-    XdrSink* beginReply() override
+    XdrSink* beginReceive() override
     {
         buf_->rewind();
         return buf_.get();
     }
 
-    void endReply() override
+    void endReceive() override
     {
         auto bytes = ::sendto(
             sock_, buf_->buf(), buf_->writePos(), 0,
@@ -192,22 +192,22 @@ public:
         ::close(sock_);
     }
 
-    XdrSource* beginCall() override
+    XdrSource* beginSend() override
     {
         return dec_.get();
     }
 
-    void endCall() override
+    void endSend() override
     {
         dec_->endRecord();
     }
 
-    XdrSink* beginReply() override
+    XdrSink* beginReceive() override
     {
         return enc_.get();
     }
 
-    void endReply() override
+    void endReceive() override
     {
         enc_->pushRecord();
     }
@@ -221,27 +221,23 @@ public:
 class TimeoutChannel: public Channel
 {
 public:
-    unique_ptr<XdrSink> beginCall() override
+    unique_ptr<XdrSink> beginSend() override
     {
         return unique_ptr<XdrSink>(new XdrMemory(buf_, sizeof(buf_)));
     }
 
-    void endCall(unique_ptr<XdrSink>&& msg) override
+    void endSend(unique_ptr<XdrSink>&& msg, bool sendit) override
     {
         msg.reset(nullptr);
     }
 
-    unique_ptr<XdrSource> beginReply(
+    unique_ptr<XdrSource> beginReceive(
         std::chrono::system_clock::duration timeout) override
     {
         return nullptr;
     }
 
-    void endReply(unique_ptr<XdrSource>&& msg, bool skip)
-    {
-    }
-
-    void close() override
+    void endReceive(unique_ptr<XdrSource>&& msg, bool skip)
     {
     }
 
@@ -365,7 +361,7 @@ TEST_F(ChannelTest, DatagramChannel)
                      sizeof(claddr)), 0);
     ASSERT_GE(::connect(clsock, reinterpret_cast<sockaddr*>(&saddr),
                         sizeof(saddr)), 0);
-    
+
     // Send a message and check the reply
     auto chan = make_shared<DatagramChannel>(clsock);
     simpleCall(chan, client, 1);

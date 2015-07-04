@@ -9,10 +9,10 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <vector>
 
 #include <rpc++/rec.h>
 #include <rpc++/rpcproto.h>
+#include <rpc++/socket.h>
 #include <rpc++/util.h>
 #include <rpc++/xdr.h>
 
@@ -105,11 +105,15 @@ private:
 
 class Channel: public std::enable_shared_from_this<Channel>
 {
+protected:
+    struct Transaction;
+
 public:
     static std::chrono::seconds maxBackoff;
 
     /// Create an RPC channel
     Channel();
+    Channel(std::shared_ptr<ServiceRegistry> svcreg);
 
     ~Channel();
 
@@ -120,28 +124,33 @@ public:
         std::function<void(XdrSource*)> xresults,
         std::chrono::system_clock::duration timeout = std::chrono::seconds(30));
 
+    /// Read a message from the channel. If the message is a reply, try to
+    /// match it with a pending call transaction and hand off a suitable
+    /// XdrSource to that transaction. Returns true if a message was received
+    /// otherwise false if the timeout was reached.
+    bool receiveMessage(
+        Transaction& tx, std::unique_lock<std::mutex>& lock,
+        std::chrono::system_clock::duration timeout);
+
     /// Return an XDR to encode an outgoing message. When the message
-    /// is complete, call endCall to send it to the remote endpoint.
-    virtual std::unique_ptr<XdrSink> beginCall() = 0;
+    /// is complete, call endSend to send it to the remote endpoint.
+    virtual std::unique_ptr<XdrSink> beginSend() = 0;
 
     /// Finish the current outgoing message and send to the remote
-    /// endpoint. The caller must pass the message pointer returned by
-    /// beginCall
-    virtual void endCall(std::unique_ptr<XdrSink>&& msg) = 0;
+    /// endpoint if sendit is true. The caller must pass the message
+    /// pointer returned by beginSend
+    virtual void endSend(std::unique_ptr<XdrSink>&& msg, bool sendit) = 0;
 
     /// Return an XDR to decode an incoming message. When the message
-    /// is decoded, call endReply.
-    virtual std::unique_ptr<XdrSource> beginReply(
+    /// is decoded, call endReceive.
+    virtual std::unique_ptr<XdrSource> beginReceive(
         std::chrono::system_clock::duration timeout) = 0;
 
     /// Signal to the derived class that we have finished processing
     /// the incoming message. If the message is not fully decoded, set
     /// skip to true, otherwise false. The caller must pass the
-    /// message pointer returned by beginReply
-    virtual void endReply(std::unique_ptr<XdrSource>&& msg, bool skip) = 0;
-
-    /// Close connection to server
-    virtual void close() = 0;
+    /// message pointer returned by beginReceive
+    virtual void endReceive(std::unique_ptr<XdrSource>&& msg, bool skip) = 0;
 
 protected:
     struct Transaction {
@@ -156,7 +165,8 @@ protected:
         {
         }
 
-        uint32_t seq;
+        uint32_t xid = 0;
+        uint32_t seq = 0;
         bool sleeping = false;
         std::unique_ptr<std::condition_variable> cv; // signalled when ready
         rpc_msg reply;
@@ -171,6 +181,7 @@ protected:
     std::mutex mutex_;
     bool running_ = false;      // true if a thread is reading
     std::unordered_map<uint32_t, Transaction> pending_; // in-flight calls
+    std::shared_ptr<ServiceRegistry> svcreg_;
 };
 
 /// Process RPC calls using the given registry of local
@@ -181,58 +192,41 @@ public:
     LocalChannel(std::shared_ptr<ServiceRegistry> svcreg);
 
     // Channel overrides
-    std::unique_ptr<XdrSink> beginCall() override;
-    void endCall(std::unique_ptr<XdrSink>&& msg) override;
-    std::unique_ptr<XdrSource> beginReply(
+    std::unique_ptr<XdrSink> beginSend() override;
+    void endSend(std::unique_ptr<XdrSink>&& msg, bool sendit) override;
+    std::unique_ptr<XdrSource> beginReceive(
         std::chrono::system_clock::duration timeout) override;
-    void endReply(std::unique_ptr<XdrSource>&& msg, bool skip) override;
-    void close() override;
+    void endReceive(std::unique_ptr<XdrSource>&& msg, bool skip) override;
 
 private:
     size_t bufferSize_;
-    std::shared_ptr<ServiceRegistry> svcreg_;
     std::deque<std::unique_ptr<XdrMemory>> queue_;
 };
 
-/// Send RPC messages over a socket
-class SocketChannel: public Channel
+/// Send or receive RPC messages over a socket. Thread safe.
+class SocketChannel: public Channel, public Socket
 {
 public:
     SocketChannel(int sock);
+    SocketChannel(int sock, std::shared_ptr<ServiceRegistry>);
 
-    ~SocketChannel();
-
-    /// Wait for the socket to become readable with the given
-    /// timeout. Return true if the socket is readable or false if the
-    /// timeout was reached.
-    bool waitForReadable(std::chrono::system_clock::duration timeout);
-
-    /// Return true if the socket is readable
-    bool isReadable() const;
-
-    /// Return true if the socket is writable
-    bool isWritable() const;
-
-    // Channel overrides
-    void close() override;
-
-protected:
-    int sock_;
+    // Socket overrides
+    bool onReadable(SocketManager* sockman) override;
 };
 
-/// Send RPC messages over a connectionless datagram socket. Thread
-/// safe.
+/// Send or receive RPC messages over a socket. Thread safe.
 class DatagramChannel: public SocketChannel
 {
 public:
     DatagramChannel(int sock);
+    DatagramChannel(int sock, std::shared_ptr<ServiceRegistry>);
 
     // Channel overrides
-    std::unique_ptr<XdrSink> beginCall() override;
-    void endCall(std::unique_ptr<XdrSink>&& msg) override;
-    std::unique_ptr<XdrSource> beginReply(
+    std::unique_ptr<XdrSink> beginSend() override;
+    void endSend(std::unique_ptr<XdrSink>&& msg, bool sendit) override;
+    std::unique_ptr<XdrSource> beginReceive(
         std::chrono::system_clock::duration timeout) override;
-    void endReply(std::unique_ptr<XdrSource>&& msg, bool skip) override;
+    void endReceive(std::unique_ptr<XdrSource>&& msg, bool skip) override;
 
 private:
     size_t bufferSize_;
@@ -244,15 +238,16 @@ class StreamChannel: public SocketChannel
 {
 public:
     StreamChannel(int sock);
+    StreamChannel(int sock, std::shared_ptr<ServiceRegistry>);
 
     ~StreamChannel();
 
     // Channel overrides
-    std::unique_ptr<XdrSink> beginCall() override;
-    void endCall(std::unique_ptr<XdrSink>&& msg) override;
-    std::unique_ptr<XdrSource> beginReply(
+    std::unique_ptr<XdrSink> beginSend() override;
+    void endSend(std::unique_ptr<XdrSink>&& msg, bool sendit) override;
+    std::unique_ptr<XdrSource> beginReceive(
         std::chrono::system_clock::duration timeout) override;
-    void endReply(std::unique_ptr<XdrSource>&& msg, bool skip) override;
+    void endReceive(std::unique_ptr<XdrSource>&& msg, bool skip) override;
 
 private:
     ptrdiff_t write(const void* buf, size_t len);
@@ -263,6 +258,24 @@ private:
     std::mutex writeMutex_;
     std::unique_ptr<XdrMemory> sendbuf_;
     std::unique_ptr<RecordWriter> sender_;
+};
+
+/// Accept incoming connections to a socket and create instances of
+/// StreamChannel for each new connection.
+class ListenSocket: public Socket
+{
+public:
+    ListenSocket(int fd, std::shared_ptr<ServiceRegistry> svcreg)
+        : Socket(fd),
+          svcreg_(svcreg)
+    {
+    }
+
+    // Socket overrides
+    bool onReadable(SocketManager* sockman) override;
+
+private:
+    std::shared_ptr<ServiceRegistry> svcreg_;
 };
 
 }

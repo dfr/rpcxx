@@ -160,9 +160,9 @@ TEST_F(ServerTest, Stream)
 
     auto chan = make_shared<StreamChannel>(sockpair[0]);
 
-    auto connreg = make_shared<ConnectionRegistry>();
-    connreg->add(make_shared<StreamConnection>(sockpair[1], 32768, svcreg));
-    thread server([connreg]() { connreg->run(); });
+    auto sockman = make_shared<SocketManager>();
+    sockman->add(make_shared<StreamChannel>(sockpair[1], svcreg));
+    thread server([sockman]() { sockman->run(); });
 
     // Send a message and check the reply
     chan->call(
@@ -189,16 +189,16 @@ TEST_F(ServerTest, Listen)
     int lsock = socket(AF_LOCAL, SOCK_STREAM, 0);
     ASSERT_GE(::bind(lsock, reinterpret_cast<sockaddr*>(&sun), sizeof(sun)), 0);
     ASSERT_GE(::listen(lsock, 5), 0);
- 
-    auto connreg = make_shared<ConnectionRegistry>();
-    connreg->add(make_shared<ListenConnection>(lsock, 32768, svcreg));
-    thread server([connreg]() { connreg->run(); });
+
+    auto sockman = make_shared<SocketManager>();
+    sockman->add(make_shared<ListenSocket>(lsock, svcreg));
+    thread server([sockman]() { sockman->run(); });
 
     // Test connecting to the socket
     int sock = socket(AF_LOCAL, SOCK_STREAM, 0);
     ASSERT_GE(::connect(
                   sock, reinterpret_cast<sockaddr*>(&sun), sizeof(sun)), 0);
-    
+
     // Send a message and check the reply
     auto chan = make_shared<StreamChannel>(sock);
     chan->call(
@@ -209,7 +209,7 @@ TEST_F(ServerTest, Listen)
     // Close this side of the socket pair. The connection registry
     // won't stop running automatically since the listen socket is
     // still valid so we tell it to stop.
-    connreg->stop();
+    sockman->stop();
     chan->close();
     chan.reset();
     server.join();

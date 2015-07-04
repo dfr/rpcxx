@@ -8,40 +8,8 @@
 
 namespace oncrpc {
 
-static std::pair<int, int> getNetType(const std::string& nettype)
-{
-    if (nettype == "tcp")
-        return std::make_pair(PF_UNSPEC, SOCK_STREAM);
-    if (nettype == "udp")
-        return std::make_pair(PF_UNSPEC, SOCK_DGRAM);
-
-    if (nettype == "tcp4")
-        return std::make_pair(PF_INET, SOCK_STREAM);
-    if (nettype == "udp4")
-        return std::make_pair(PF_INET, SOCK_DGRAM);
-
-    if (nettype == "tcp6")
-        return std::make_pair(PF_INET6, SOCK_STREAM);
-    if (nettype == "udp6")
-        return std::make_pair(PF_INET6, SOCK_DGRAM);
-
-    throw RpcError("Bad nettype");
-}
-
-AddressInfo::AddressInfo(addrinfo* ai)
-    : flags(ai->ai_flags),
-      family(ai->ai_family),
-      socktype(ai->ai_socktype),
-      protocol(ai->ai_protocol),
-      addrlen(ai->ai_addrlen),
-      addr(reinterpret_cast<sockaddr*>(&storage)),
-      canonname(ai->ai_canonname ? ai->ai_canonname : "")
-{
-    memcpy(addr, ai->ai_addr, ai->ai_addrlen);
-}
-
 std::unique_ptr<AddressInfo> uaddr2taddr(
-    const std::string& uaddr, const std::string& nettype)
+    const std::string& uaddr, const std::string& netid)
 {
     auto portloIndex = uaddr.rfind('.');
     if (portloIndex == std::string::npos)
@@ -60,7 +28,7 @@ std::unique_ptr<AddressInfo> uaddr2taddr(
     addrinfo hints;
     addrinfo* addrs;
     memset(&hints, 0, sizeof(hints));
-    auto nt = getNetType(nettype);
+    auto nt = getNetId(netid);
     hints.ai_flags = AI_NUMERICHOST;
     hints.ai_family = std::get<0>(nt);
     hints.ai_socktype = std::get<1>(nt);
@@ -75,36 +43,11 @@ std::unique_ptr<AddressInfo> uaddr2taddr(
     return std::move(res);
 }
 
-std::vector<AddressInfo> getAddressInfo(
-    const std::string& host, const std::string& service,
-    const std::string& nettype)
-{
-    addrinfo hints;
-    addrinfo* res0;
-    memset(&hints, 0, sizeof hints);
-    auto nt = getNetType(nettype);
-    hints.ai_family = std::get<0>(nt);
-    hints.ai_socktype = std::get<1>(nt);
-    int err = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &res0);
-    if (err) {
-        std::ostringstream msg;
-        msg << "RPC: " << host << ":" << service << ": " << gai_strerror(err);
-        throw RpcError(msg.str());
-    }
-
-    std::vector<AddressInfo> addrs;
-    for (addrinfo* res = res0; res; res = res->ai_next)
-        addrs.emplace_back(res);
-    ::freeaddrinfo(res0);
-
-    return addrs;
-}
-
 int connectSocket(
     const std::string& host, const std::string& service,
-    const std::string& nettype)
+    const std::string& netid)
 {
-    auto addrs = getAddressInfo(host, service, nettype);
+    auto addrs = getAddressInfo(host, service, netid);
 
     int s = -1;
     std::string cause = "";
@@ -170,23 +113,23 @@ std::shared_ptr<Channel> connectChannel(std::unique_ptr<AddressInfo>&& addr)
 
 std::shared_ptr<Channel> connectChannel(
     const std::string& host, uint32_t prog, uint32_t vers,
-    const std::string& nettype)
+    const std::string& netid)
 {
-    auto rpcbind = RpcBind(connectChannel(host, "sunrpc", nettype));
+    auto rpcbind = RpcBind(connectChannel(host, "sunrpc", netid));
     auto uaddr = rpcbind.getaddr(rpcb{prog, vers, "", "", ""});
     if (uaddr == "") {
         throw RpcError("Program not registered");
     }
-    return connectChannel(uaddr2taddr(uaddr, nettype));
+    return connectChannel(uaddr2taddr(uaddr, netid));
 }
 
 std::shared_ptr<Channel> connectChannel(
     const std::string& host, const std::string& service,
-    const std::string& nettype)
+    const std::string& netid)
 {
     int sock;
-    sock = connectSocket(host, service, nettype);
-    if (std::get<1>(getNetType(nettype)) == SOCK_STREAM)
+    sock = connectSocket(host, service, netid);
+    if (std::get<1>(getNetId(netid)) == SOCK_STREAM)
         return std::make_shared<StreamChannel>(sock);
     else
         return std::make_shared<DatagramChannel>(sock);

@@ -41,14 +41,20 @@ ServiceRegistry::lookup(uint32_t prog, uint32_t vers) const
 bool
 ServiceRegistry::process(XdrSource* xdrin, XdrSink* xdrout)
 {
-    rpc_msg call_msg;
-
+    rpc_msg msg;
     try {
-        xdr(call_msg, xdrin);
+        xdr(msg, xdrin);
     }
-    catch (XdrError&) {
+    catch (XdrError& e) {
         return false;
     }
+    return process(std::move(msg), xdrin, xdrout);
+}
+
+bool
+ServiceRegistry::process(rpc_msg&& msg, XdrSource* xdrin, XdrSink* xdrout)
+{
+    rpc_msg call_msg = std::move(msg);
 
     if (call_msg.mtype != CALL)
         return false;
@@ -107,155 +113,3 @@ ServiceRegistry::process(XdrSource* xdrin, XdrSink* xdrout)
     }
     return true;
 }
-
-void
-ConnectionRegistry::add(std::shared_ptr<Connection> conn)
-{
-    std::lock_guard<std::mutex> lock(mutex_);
-    conns_[conn->sock()] = conn;
-}
-
-void
-ConnectionRegistry::remove(std::shared_ptr<Connection> conn)
-{
-    std::lock_guard<std::mutex> lock(mutex_);
-    conns_.erase(conn->sock());
-}
-
-void
-ConnectionRegistry::run()
-{
-    mutex_.lock();
-    while (conns_.size() > 0 && !stopping_) {
-        fd_set rset;
-        int maxfd = 0;
-        FD_ZERO(&rset);
-        for (const auto& i: conns_) {
-            int fd = i.first;
-            maxfd = std::max(maxfd, fd);
-            FD_SET(fd, &rset);
-        }
-        mutex_.unlock();
-        auto nready = ::select(maxfd + 1, &rset, nullptr, nullptr, nullptr);
-        if (nready < 0) {
-            throw std::system_error(errno, std::system_category());
-        }
-
-        if (nready == 0)
-            continue;
-
-        mutex_.lock();
-        std::vector<std::shared_ptr<Connection>> ready;
-        for (const auto& i: conns_) {
-            if (FD_ISSET(i.first, &rset)) {
-                ready.push_back(i.second);
-            }
-        }
-        mutex_.unlock();
-
-        for (auto conn: ready) {
-            if (!conn->onReadable(this))
-                remove(conn);
-        }
-
-        mutex_.lock();
-    }
-    mutex_.unlock();
-}
-
-Connection::Connection(
-    int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg)
-    : sock_(sock), bufferSize_(bufferSize), svcreg_(svcreg)
-{
-}
-
-Connection::~Connection()
-{
-    ::close(sock_);
-}
-
-DatagramConnection::DatagramConnection(
-    int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg)
-    : Connection(sock, bufferSize, svcreg),
-      receivebuf_(bufferSize),
-      sendbuf_(bufferSize),
-      dec_(std::make_unique<XdrMemory>(receivebuf_.data(), bufferSize)),
-      enc_(std::make_unique<XdrMemory>(sendbuf_.data(), bufferSize))
-{
-}
-
-bool
-DatagramConnection::onReadable(ConnectionRegistry*)
-{
-    enc_->rewind();
-    dec_->rewind();
-    auto bytes = ::read(sock_, receivebuf_.data(), bufferSize_);
-    if (bytes < 0)
-        return false;
-    dec_->setReadSize(bytes);
-    if (svcreg_->process(dec_.get(), enc_.get()))
-        if (::write(sock_, sendbuf_.data(), enc_->writePos()) < 0)
-            return false;
-    return true;
-}
-
-StreamConnection::StreamConnection(
-    int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg)
-    : Connection(sock, bufferSize, svcreg),
-      dec_(std::make_unique<RecordReader>(
-               bufferSize,
-               [this](void* buf, size_t len) {
-                   return ::read(sock_, buf, len);
-               })),
-      enc_(std::make_unique<RecordWriter>(
-               bufferSize,
-               [this](const void* buf, size_t len) {
-                   const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
-                   size_t n = len;
-                   while (n > 0) {
-                       auto bytes = ::write(sock_, p, len);
-                       if (bytes < 0)
-                           throw std::system_error(errno, std::system_category());
-                       p += bytes;
-                       n -= bytes;
-                   }
-                   return len;
-               }))
-{
-}
-
-bool
-StreamConnection::onReadable(ConnectionRegistry*)
-{
-    try {
-        if (svcreg_->process(dec_.get(), enc_.get())) {
-            dec_->skipRecord();
-            enc_->pushRecord();
-            return true;
-        }
-    }
-    catch (std::system_error&) {
-    }
-    return false;
-}
-
-ListenConnection::ListenConnection(
-    int sock, size_t bufferSize, std::shared_ptr<ServiceRegistry> svcreg)
-    : Connection(sock, bufferSize, svcreg)
-{
-}
-
-bool
-ListenConnection::onReadable(ConnectionRegistry* connreg)
-{
-    sockaddr_storage ss;
-    socklen_t len = sizeof(ss);
-    auto newsock = ::accept(sock_, reinterpret_cast<sockaddr*>(&ss), &len);
-    if (newsock < 0)
-        throw std::system_error(errno, std::system_category());
-    auto conn = std::make_shared<StreamConnection>(
-        newsock, bufferSize_, svcreg_);
-    connreg->add(conn);
-    return true;
-}
-
