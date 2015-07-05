@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include <rpc++/channel.h>
+#include <rpc++/errors.h>
 #include <rpc++/rpcbind.h>
 #include <rpc++/util.h>
 

@@ -25,84 +25,6 @@ class RecordReader;
 class RecordWriter;
 class ServiceRegistry;
 
-/// MSG_ACCEPTED, PROG_UNAVAIL
-class ProgramUnavailable: public RpcError
-{
-public:
-    ProgramUnavailable(uint32_t prog);
-
-    uint32_t prog() const { return prog_; }
-
-private:
-    uint32_t prog_;
-};
-
-/// MSG_ACCEPTED, PROC_UNAVAIL
-class ProcedureUnavailable: public RpcError
-{
-public:
-    ProcedureUnavailable(uint32_t prog);
-
-    uint32_t proc() const { return proc_; }
-
-private:
-    uint32_t proc_;
-};
-
-/// MSG_ACCEPTED, PROG_MISMATCH
-class VersionMismatch: public RpcError
-{
-public:
-    VersionMismatch(uint32_t minver, uint32_t maxver);
-
-    uint32_t minver() const { return minver_; }
-    uint32_t maxver() const { return maxver_; }
-
-private:
-    uint32_t minver_;
-    uint32_t maxver_;
-};
-
-/// MSG_ACCEPTED, GARBAGE_ARGS
-class GarbageArgs: public RpcError
-{
-public:
-    GarbageArgs();
-};
-
-/// MSG_ACCEPTED, SYSTEM_ERR
-class SystemError: public RpcError
-{
-public:
-    SystemError();
-};
-
-/// MSG_DENIED, RPC_MISMATCH
-class ProtocolMismatch: public RpcError
-{
-public:
-    ProtocolMismatch(uint32_t minver, uint32_t maxver);
-
-    uint32_t minver() const { return minver_; }
-    uint32_t maxver() const { return maxver_; }
-
-private:
-    uint32_t minver_;
-    uint32_t maxver_;
-};
-
-/// MSG_DENIED, AUTH_ERROR
-class AuthError: public RpcError
-{
-public:
-    AuthError(auth_stat stat);
-
-    auth_stat stat() const { return stat_; }
-
-private:
-    auth_stat stat_;
-};
-
 class Channel: public std::enable_shared_from_this<Channel>
 {
 protected:
@@ -126,31 +48,32 @@ public:
 
     /// Read a message from the channel. If the message is a reply, try to
     /// match it with a pending call transaction and hand off a suitable
-    /// XdrSource to that transaction. Returns true if a message was received
+    /// XdrSource to that transaction. Return true if a message was received
     /// otherwise false if the timeout was reached.
-    bool receiveMessage(
+    bool processIncomingMessage(
         Transaction& tx, std::unique_lock<std::mutex>& lock,
         std::chrono::system_clock::duration timeout);
 
-    /// Return an XDR to encode an outgoing message. When the message
-    /// is complete, call endSend to send it to the remote endpoint.
-    virtual std::unique_ptr<XdrSink> beginSend() = 0;
+    /// Return a buffer suitable for encoding an outgoing message. When
+    /// the message is complete, call sendMessage to send it to the remote
+    /// endpoint.
+    virtual std::unique_ptr<XdrMemory> acquireBuffer() = 0;
 
-    /// Finish the current outgoing message and send to the remote
-    /// endpoint if sendit is true. The caller must pass the message
-    /// pointer returned by beginSend
-    virtual void endSend(std::unique_ptr<XdrSink>&& msg, bool sendit) = 0;
+    /// Discard a message buffer returned by acquireBuffer or receiveMessage.
+    virtual void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) = 0;
 
-    /// Return an XDR to decode an incoming message. When the message
-    /// is decoded, call endReceive.
-    virtual std::unique_ptr<XdrSource> beginReceive(
+    /// Send the message to the remote endpoint. The message pointer should
+    /// be one previously returned by acquireBuffer and will be released
+    /// as for releaseBuffer.
+    virtual void sendMessage(std::unique_ptr<XdrMemory>&& msg) = 0;
+
+    /// Receive an incoming message from the channel. If a message was
+    /// received, a buffer containing the message is returned.
+    /// This pointer should be released after processing using releaseBuffer.
+    /// If no message was received before the timeout, a null pointer is
+    /// returned.
+    virtual std::unique_ptr<XdrMemory> receiveMessage(
         std::chrono::system_clock::duration timeout) = 0;
-
-    /// Signal to the derived class that we have finished processing
-    /// the incoming message. If the message is not fully decoded, set
-    /// skip to true, otherwise false. The caller must pass the
-    /// message pointer returned by beginReceive
-    virtual void endReceive(std::unique_ptr<XdrSource>&& msg, bool skip) = 0;
 
 protected:
     struct Transaction {
@@ -170,7 +93,7 @@ protected:
         bool sleeping = false;
         std::unique_ptr<std::condition_variable> cv; // signalled when ready
         rpc_msg reply;
-        std::unique_ptr<XdrSource> body;
+        std::unique_ptr<XdrMemory> body;
     };
 
     uint32_t xid_;
@@ -192,15 +115,34 @@ public:
     LocalChannel(std::shared_ptr<ServiceRegistry> svcreg);
 
     // Channel overrides
-    std::unique_ptr<XdrSink> beginSend() override;
-    void endSend(std::unique_ptr<XdrSink>&& msg, bool sendit) override;
-    std::unique_ptr<XdrSource> beginReceive(
+    std::unique_ptr<XdrMemory> acquireBuffer() override;
+    void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
+    void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
+    std::unique_ptr<XdrMemory> receiveMessage(
         std::chrono::system_clock::duration timeout) override;
-    void endReceive(std::unique_ptr<XdrSource>&& msg, bool skip) override;
 
 private:
+    friend struct ReplyChannel;
+    struct ReplyChannel: public Channel
+    {
+        ReplyChannel(LocalChannel* chan)
+            : chan_(chan)
+        {
+        }
+
+        // Channel overrides
+        std::unique_ptr<XdrMemory> acquireBuffer() override;
+        void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
+        void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
+        std::unique_ptr<XdrMemory> receiveMessage(
+            std::chrono::system_clock::duration timeout) override;
+
+        LocalChannel* chan_;
+    };
+
     size_t bufferSize_;
     std::deque<std::unique_ptr<XdrMemory>> queue_;
+    std::shared_ptr<ReplyChannel> replyChannel_;
 };
 
 /// Send or receive RPC messages over a socket. Thread safe.
@@ -222,11 +164,11 @@ public:
     DatagramChannel(int sock, std::shared_ptr<ServiceRegistry>);
 
     // Channel overrides
-    std::unique_ptr<XdrSink> beginSend() override;
-    void endSend(std::unique_ptr<XdrSink>&& msg, bool sendit) override;
-    std::unique_ptr<XdrSource> beginReceive(
+    std::unique_ptr<XdrMemory> acquireBuffer() override;
+    void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
+    void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
+    std::unique_ptr<XdrMemory> receiveMessage(
         std::chrono::system_clock::duration timeout) override;
-    void endReceive(std::unique_ptr<XdrSource>&& msg, bool skip) override;
 
 private:
     size_t bufferSize_;
@@ -243,11 +185,11 @@ public:
     ~StreamChannel();
 
     // Channel overrides
-    std::unique_ptr<XdrSink> beginSend() override;
-    void endSend(std::unique_ptr<XdrSink>&& msg, bool sendit) override;
-    std::unique_ptr<XdrSource> beginReceive(
+    std::unique_ptr<XdrMemory> acquireBuffer() override;
+    void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
+    void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
+    std::unique_ptr<XdrMemory> receiveMessage(
         std::chrono::system_clock::duration timeout) override;
-    void endReceive(std::unique_ptr<XdrSource>&& msg, bool skip) override;
 
 private:
     ptrdiff_t write(const void* buf, size_t len);

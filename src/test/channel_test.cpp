@@ -3,6 +3,7 @@
 
 #include <rpc++/channel.h>
 #include <rpc++/client.h>
+#include <rpc++/errors.h>
 #include <rpc++/server.h>
 #include <gtest/gtest.h>
 
@@ -63,7 +64,7 @@ public:
 
                 bool stopping = false;
                 while (!stopping) {
-                    auto dec = beginSend();
+                    auto dec = acquireBuffer();
                     rpc_msg call_msg;
                     uint32_t val;
 
@@ -71,14 +72,14 @@ public:
                     auto cbody = call_msg.cbody();
                     if (cbody.proc == 1)
                         xdr(val, dec);
-                    endSend();
+                    sendMessage();
 
                     accepted_reply ar;
                     ar.verf = { AUTH_NONE, {} };
                     ar.stat = SUCCESS;
                     rpc_msg reply_msg(call_msg.xid, reply_body(std::move(ar)));
 
-                    auto enc = beginReceive();
+                    auto enc = receiveMessage();
                     xdr(reply_msg, enc);
                     if (cbody.proc == 1)
                         xdr(val, enc);
@@ -101,9 +102,9 @@ public:
             client.get(), 2, [](XdrSink* xdrs) {}, [](XdrSource* xdrs) {});
     }
 
-    virtual XdrSource* beginSend() = 0;
-    virtual void endSend() = 0;
-    virtual XdrSink* beginReceive() = 0;
+    virtual XdrSource* acquireBuffer() = 0;
+    virtual void sendMessage() = 0;
+    virtual XdrSink* receiveMessage() = 0;
     virtual void endReceive() = 0;
 
     thread thread_;
@@ -124,7 +125,7 @@ public:
         ::close(sock_);
     }
 
-    XdrSource* beginSend() override
+    XdrSource* acquireBuffer() override
     {
         buf_->rewind();
         addrlen_ = addr_.sun_len = sizeof(addr_);
@@ -134,11 +135,11 @@ public:
         return buf_.get();
     }
 
-    void endSend() override
+    void sendMessage() override
     {
     }
 
-    XdrSink* beginReceive() override
+    XdrSink* receiveMessage() override
     {
         buf_->rewind();
         return buf_.get();
@@ -192,17 +193,17 @@ public:
         ::close(sock_);
     }
 
-    XdrSource* beginSend() override
+    XdrSource* acquireBuffer() override
     {
         return dec_.get();
     }
 
-    void endSend() override
+    void sendMessage() override
     {
         dec_->endRecord();
     }
 
-    XdrSink* beginReceive() override
+    XdrSink* receiveMessage() override
     {
         return enc_.get();
     }
@@ -221,24 +222,25 @@ public:
 class TimeoutChannel: public Channel
 {
 public:
-    unique_ptr<XdrSink> beginSend() override
+    unique_ptr<XdrMemory> acquireBuffer() override
     {
-        return unique_ptr<XdrSink>(new XdrMemory(buf_, sizeof(buf_)));
+        return make_unique<XdrMemory>(buf_, sizeof(buf_));
     }
 
-    void endSend(unique_ptr<XdrSink>&& msg, bool sendit) override
+    void releaseBuffer(unique_ptr<XdrMemory>&& msg) override
     {
-        msg.reset(nullptr);
+        msg.reset();
     }
 
-    unique_ptr<XdrSource> beginReceive(
+    void sendMessage(unique_ptr<XdrMemory>&& msg) override
+    {
+        msg.reset();
+    }
+
+    unique_ptr<XdrMemory> receiveMessage(
         std::chrono::system_clock::duration timeout) override
     {
         return nullptr;
-    }
-
-    void endReceive(unique_ptr<XdrSource>&& msg, bool skip)
-    {
     }
 
     uint8_t buf_[1500];
@@ -266,21 +268,24 @@ TEST_F(ChannelTest, LocalChannel)
     EXPECT_THROW(simpleCall(channel, client, 1), ProgramUnavailable);
 
     // Add a service handler for program 1234, version 2
-    auto handler = [](uint32_t proc, XdrSource* xdrin, XdrSink* xdrout)
+    auto handler = [](CallContext&& ctx)
         {
-            uint32_t v;
-            switch (proc) {
+            switch (ctx.proc()) {
             case 0:
-                return true;
+                ctx.sendReply([](XdrSink*){});
+                break;
+
             case 1:
-                xdr(v, xdrin);
-                xdr(v, xdrout);
-                return true;
+                uint32_t val;
+                ctx.getArgs([&](XdrSource* xdrs){ xdr(val, xdrs); });
+                ctx.sendReply([&](XdrSink* xdrs){ xdr(val, xdrs); });
+                break;
+
             default:
-                return false;
+                ctx.procedureUnavailable();
             }
         };
-    svcreg->add(1234, 2, ServiceEntry{handler, {0, 1}});
+    svcreg->add(1234, 2, handler);
 
     // Try calling with the wrong version number and check for
     // PROG_MISMATCH
@@ -306,21 +311,24 @@ TEST_F(ChannelTest, LocalManyThreads)
     auto cl = std::make_shared<LocalChannel>(svcreg);
 
     // Add a service handler for program 1234, version 1
-    auto handler = [](uint32_t proc, XdrSource* xdrin, XdrSink* xdrout)
+    auto handler = [](CallContext&& ctx)
         {
-            uint32_t v;
-            switch (proc) {
+            switch (ctx.proc()) {
             case 0:
-                return true;
+                ctx.sendReply([](XdrSink*){});
+                break;
+
             case 1:
-                xdr(v, xdrin);
-                xdr(v, xdrout);
-                return true;
+                uint32_t val;
+                ctx.getArgs([&](XdrSource* xdrs){ xdr(val, xdrs); });
+                ctx.sendReply([&](XdrSink* xdrs){ xdr(val, xdrs); });
+                break;
+
             default:
-                return false;
+                ctx.procedureUnavailable();
             }
         };
-    svcreg->add(1234, 1, ServiceEntry{handler, {0, 1}});
+    svcreg->add(1234, 1, handler);
 
     int threadCount = 20;
     int iterations = 200;
@@ -468,21 +476,24 @@ TEST_F(ChannelTest, BadReply)
     auto svcreg = make_shared<ServiceRegistry>();
     auto channel = make_shared<LocalChannel>(svcreg);
 
-    auto handler = [](uint32_t proc, XdrSource* xdrin, XdrSink* xdrout)
+    auto handler = [](CallContext&& ctx)
         {
-            uint32_t v;
-            switch (proc) {
+            switch (ctx.proc()) {
             case 0:
-                return true;
+                ctx.sendReply([](XdrSink*){});
+                break;
+
             case 1:
-                xdr(v, xdrin);
-                xdr(v, xdrout);
-                return true;
+                uint32_t val;
+                ctx.getArgs([&](XdrSource* xdrs){ xdr(val, xdrs); });
+                ctx.sendReply([&](XdrSink* xdrs){ xdr(val, xdrs); });
+                break;
+
             default:
-                return false;
+                ctx.procedureUnavailable();
             }
         };
-    svcreg->add(1234, 1, ServiceEntry{handler, {0, 1}});
+    svcreg->add(1234, 1, handler);
 
     EXPECT_THROW(
         channel->call(

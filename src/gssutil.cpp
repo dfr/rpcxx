@@ -1,6 +1,7 @@
 #include <iostream>
 #include <sstream>
 
+#include <rpc++/errors.h>
 #include <rpc++/gss.h>
 #include <rpc++/util.h>
 

@@ -11,6 +11,7 @@
 
 #include <rpc++/channel.h>
 #include <rpc++/client.h>
+#include <rpc++/errors.h>
 #include <rpc++/pmap.h>
 #include <rpc++/rpcbind.h>
 

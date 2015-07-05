@@ -5,22 +5,24 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 
+#include <rpc++/errors.h>
 #include <rpc++/rpcproto.h>
 #include <rpc++/server.h>
 
 using namespace oncrpc;
 
 void
-ServiceRegistry::add(
-        uint32_t prog, uint32_t vers, ServiceEntry&& entry)
+ServiceRegistry::add(uint32_t prog, uint32_t vers, Service&& svc)
 {
+    std::unique_lock<std::mutex> lock(mutex_);
     programs_[prog].insert(vers);
-    services_[std::make_pair(prog, vers)] = entry;
+    services_[std::make_pair(prog, vers)] = std::move(svc);
 }
 
 void
 ServiceRegistry::remove(uint32_t prog, uint32_t vers)
 {
+    std::unique_lock<std::mutex> lock(mutex_);
     auto p = programs_.find(prog);
     assert(p != programs_.end());
     p->second.erase(vers);
@@ -29,87 +31,58 @@ ServiceRegistry::remove(uint32_t prog, uint32_t vers)
     services_.erase(std::pair<uint32_t, uint32_t>(prog, vers));
 }
 
-const ServiceEntry*
+const Service
 ServiceRegistry::lookup(uint32_t prog, uint32_t vers) const
 {
+    std::unique_lock<std::mutex> lock(mutex_);
     auto p = services_.find(std::make_pair(prog, vers));
     if (p == services_.end())
-        return nullptr;
-    return &p->second;
+        throw ProgramUnavailable(prog);
+    return p->second;
 }
 
-bool
-ServiceRegistry::process(XdrSource* xdrin, XdrSink* xdrout)
+void
+ServiceRegistry::process(CallContext&& ctx)
 {
-    rpc_msg msg;
-    try {
-        xdr(msg, xdrin);
-    }
-    catch (XdrError& e) {
-        return false;
-    }
-    return process(std::move(msg), xdrin, xdrout);
-}
-
-bool
-ServiceRegistry::process(rpc_msg&& msg, XdrSource* xdrin, XdrSink* xdrout)
-{
-    rpc_msg call_msg = std::move(msg);
+    const rpc_msg& call_msg = ctx.msg();
 
     if (call_msg.mtype != CALL)
-        return false;
+        return;
 
     if (call_msg.cbody().rpcvers != 2) {
-        rejected_reply rreply;
-        rreply.stat = RPC_MISMATCH;
-        rreply.rpc_mismatch.low = 2;
-        rreply.rpc_mismatch.high = 2;
-        rpc_msg reply_msg(call_msg.xid, std::move(rreply));
-        xdr(reply_msg, xdrout);
-        return true;
+        ctx.rpcMismatch();
+        return;
     }
 
     // XXX validate auth
 
-    accepted_reply areply;
-
-    areply.verf = { AUTH_NONE, {} };
-    auto p = services_.find(
-        std::make_pair(call_msg.cbody().prog, call_msg.cbody().vers));
-    if (p != services_.end()) {
-        auto proc = call_msg.cbody().proc;
-        const auto& entry = p->second;
-        if (entry.procs.find(proc) != entry.procs.end()) {
-            areply.stat = SUCCESS;
-            rpc_msg reply_msg(call_msg.xid, reply_body(std::move(areply)));
-            xdr(reply_msg, xdrout);
-            entry.handler(proc, xdrin, xdrout);
-        }
-        else {
-            areply.stat = PROC_UNAVAIL;
-            rpc_msg reply_msg(call_msg.xid, reply_body(std::move(areply)));
-            xdr(reply_msg, xdrout);
-        }
+    try {
+        // Simple single-threaded dispatch. To implement more sophisticated
+        // dispatch mechanisms, we could wrap the value returned by lookup
+        // with a shim which moves the call context to be executed by a thread
+        // pool. Alternatively, the application can supply a service handler
+        // which could defer execution to some other executor.
+        ctx.setService(lookup(ctx.prog(), ctx.vers()));
+        ctx.run();
     }
-    else {
+    catch (ProgramUnavailable& e) {
         // Figure out which error message to use
-        auto p = programs_.find(call_msg.cbody().prog);
+        std::unique_lock<std::mutex> lock(mutex_);
+        auto p = programs_.find(ctx.prog());
         if (p == programs_.end()) {
-            areply.stat = PROG_UNAVAIL;
+            lock.unlock();
+            ctx.programUnavailable();
         }
         else {
-            areply.stat = PROG_MISMATCH;
-            auto& mi = areply.mismatch_info;
-            mi.low = ~0U;
-            mi.high = 0;
+            uint32_t low = ~0U;
+            uint32_t high = 0;
             const auto& entry = p->second;
             for (const auto& vers: entry) {
-                mi.low = std::min(mi.low, vers);
-                mi.high = std::max(mi.high, vers);
+                low = std::min(low, vers);
+                high = std::max(high, vers);
             }
+            lock.unlock();
+            ctx.versionMismatch(low, high);
         }
-        rpc_msg reply_msg(call_msg.xid, reply_body(std::move(areply)));
-        xdr(reply_msg, xdrout);
     }
-    return true;
 }

@@ -25,30 +25,27 @@ public:
         addTestService();
     }
 
-    bool testService(uint32_t proc, XdrSource* xdrin, XdrSink* xdrout)
+    void testService(CallContext&& ctx)
     {
-        switch (proc) {
+        switch (ctx.proc()) {
         case 0:
-            return true;
+            ctx.sendReply([](XdrSink*){});
+            break;
 
         case 1:
             uint32_t val;
-            xdr(val, xdrin);
-            xdr(val, xdrout);
-            return true;
+            ctx.getArgs([&](XdrSource* xdrs){ xdr(val, xdrs); });
+            ctx.sendReply([&](XdrSink* xdrs){ xdr(val, xdrs); });
+            break;
 
         default:
-            return false;
+            ctx.procedureUnavailable();
         }
     }
 
     void addTestService()
     {
-        svcreg->add(
-            1234, 1,
-            ServiceEntry{
-                bind(&ServerTest::testService, this, _1, _2, _3),
-                {0, 1}});
+        svcreg->add(1234, 1, bind(&ServerTest::testService, this, _1));
     }
 
     void checkReply(uint32_t prog, uint32_t vers, uint32_t proc,
@@ -57,24 +54,19 @@ public:
                     const vector<uint8_t>& res,
                     rpc_msg* reply_msg = nullptr)
     {
-        uint8_t call[1500];
-        uint8_t reply[1500];
-        auto xdrout = unique_ptr<XdrMemory>(
-            new XdrMemory(call, sizeof(call)));
-        auto xdrin = unique_ptr<XdrMemory>(
-            new XdrMemory(reply, sizeof(reply)));
+        LocalChannel chan(svcreg);
 
         call_body cbody;
         cbody.prog = prog;
         cbody.vers = vers;
         cbody.proc = proc;
         rpc_msg msg(1, std::move(cbody));
+        auto xdrout = chan.acquireBuffer();
         xdr(msg, static_cast<XdrSink*>(xdrout.get()));
         xdrout->putBytes(args.data(), args.size());
-        xdrout->rewind();
+        chan.sendMessage(move(xdrout));
 
-        EXPECT_TRUE(svcreg->process(xdrout.get(), xdrin.get()));
-        xdrin->rewind();
+        auto xdrin = chan.receiveMessage(0s);
         xdr(msg, static_cast<XdrSource*>(xdrin.get()));
         EXPECT_EQ(msg.xid, 1);
         EXPECT_EQ(msg.mtype, REPLY);
@@ -85,6 +77,8 @@ public:
         t.resize(res.size());
         xdrin->getBytes(t.data(), t.size());
         EXPECT_EQ(res, t);
+
+        chan.releaseBuffer(move(xdrin));
 
         if (reply_msg)
             *reply_msg = std::move(msg);
@@ -101,12 +95,7 @@ TEST_F(ServerTest, Lookup)
 
 TEST_F(ServerTest, ProtocolMismatch)
 {
-    uint8_t call[1500];
-    uint8_t reply[1500];
-    auto xdrout = unique_ptr<XdrMemory>(
-        new XdrMemory(call, sizeof(call)));
-    auto xdrin = unique_ptr<XdrMemory>(
-        new XdrMemory(reply, sizeof(reply)));
+    LocalChannel chan(svcreg);
 
     // Check RPC_MISMATCH is generated for rpcvers other than 2
     call_body cbody;
@@ -115,12 +104,13 @@ TEST_F(ServerTest, ProtocolMismatch)
     cbody.vers = 0;
     cbody.proc = 0;
     rpc_msg msg(1, std::move(cbody));
+    auto xdrout = chan.acquireBuffer();
     xdr(msg, static_cast<XdrSink*>(xdrout.get()));
-    xdrout->rewind();
+    chan.sendMessage(move(xdrout));
 
-    EXPECT_TRUE(svcreg->process(xdrout.get(), xdrin.get()));
-    xdrin->rewind();
+    auto xdrin = chan.receiveMessage(0s);
     xdr(msg, static_cast<XdrSource*>(xdrin.get()));
+    chan.releaseBuffer(move(xdrin));
     EXPECT_EQ(msg.xid, 1);
     EXPECT_EQ(msg.mtype, REPLY);
     EXPECT_EQ(msg.rbody().stat, MSG_DENIED);
@@ -145,6 +135,11 @@ TEST_F(ServerTest, ProgramMismatch)
 TEST_F(ServerTest, ProcedureUnavailable)
 {
     checkReply(1234, 1, 2, PROC_UNAVAIL, {}, {});
+}
+
+TEST_F(ServerTest, GarbageArgs)
+{
+    checkReply(1234, 1, 1, GARBAGE_ARGS, {}, {});
 }
 
 TEST_F(ServerTest, Success)

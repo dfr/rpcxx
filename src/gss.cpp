@@ -3,6 +3,7 @@
 #include <sstream>
 
 #include <rpc++/channel.h>
+#include <rpc++/errors.h>
 #include <rpc++/gss.h>
 #include <rpc++/util.h>
 

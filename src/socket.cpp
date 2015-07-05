@@ -3,6 +3,7 @@
 
 #include <unistd.h>
 
+#include <rpc++/errors.h>
 #include <rpc++/socket.h>
 #include <rpc++/util.h>
 

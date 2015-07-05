@@ -1,6 +1,4 @@
-#include <iostream>
 #include <random>
-#include <sstream>
 
 #include <unistd.h>
 #include <sys/select.h>
@@ -9,6 +7,7 @@
 
 #include <rpc++/channel.h>
 #include <rpc++/client.h>
+#include <rpc++/errors.h>
 #include <rpc++/rec.h>
 #include <rpc++/server.h>
 #include <rpc++/xdr.h>
@@ -25,91 +24,6 @@ static nextXid()
     std::lock_guard<std::mutex> lock(mutex);
     return rnd();
 }
-
-ProgramUnavailable::ProgramUnavailable(uint32_t prog)
-    : RpcError([prog]() {
-            std::ostringstream msg;
-            msg << "RPC: program " << prog << " unavailable";
-            return msg.str();
-        }()),
-      prog_(prog)
-{
-}
-
-ProcedureUnavailable::ProcedureUnavailable(uint32_t proc)
-    : RpcError([proc]() {
-            std::ostringstream msg;
-            msg << "RPC: procedure " << proc << " unavailable";
-            return msg.str();
-        }()),
-      proc_(proc)
-{
-}
-
-VersionMismatch::VersionMismatch(uint32_t minver, uint32_t maxver)
-    : RpcError([minver, maxver]() {
-            std::ostringstream msg;
-            msg << "RPC: program version mismatch: low version = "
-                << minver << ", high version = " << maxver;
-            return msg.str();
-        }()),
-      minver_(minver),
-      maxver_(maxver)
-{
-}
-
-GarbageArgs::GarbageArgs()
-    : RpcError("RPC: garbage args")
-{
-}
-
-SystemError::SystemError()
-    : RpcError("RPC: remote system error")
-{
-}
-
-ProtocolMismatch::ProtocolMismatch(uint32_t minver, uint32_t maxver)
-    : RpcError([minver, maxver]() {
-            std::ostringstream msg;
-            msg << "RPC: protocol version mismatch: low version = "
-                << minver << ", high version = " << maxver;
-            return msg.str();
-        }()),
-      minver_(minver),
-      maxver_(maxver)
-{
-}
-
-AuthError::AuthError(auth_stat stat)
-    : RpcError([stat]() {
-            static const char* str[] = {
-                "AUTH_OK",
-                "AUTH_BADCRED",
-                "AUTH_REJECTEDCRED",
-                "AUTH_BADVERF",
-                "AUTH_REJECTEDVERF",
-                "AUTH_TOOWEAK",
-                "AUTH_INVALIDRESP",
-                "AUTH_FAILED",
-                "AUTH_KERB",
-                "AUTH_TIMEEXPIRE",
-                "AUTH_TKT",
-                "AUTH_DECODE",
-                "AUTH_NET",
-                "RPCSEC_GSS_CREDPROBLEM",
-                "RPCSEC_GSS_CTXPROBLEM"
-            };
-            std::ostringstream msg;
-            if (stat < AUTH_OK || stat > RPCSEC_GSS_CTXPROBLEM)
-                msg << "RPC: unknown auth error: " << int(stat);
-            else
-                msg << "RPC: auth error: " << str[stat];
-            return msg.str();
-        }()),
-      stat_(stat)
-{
-}
-
 
 std::chrono::seconds Channel::maxBackoff(30);
 
@@ -158,9 +72,9 @@ call_again:
     for (;;) {
         // Drop the lock while we transmit
         lock.unlock();
-        auto xdrout = beginSend();
+        auto xdrout = acquireBuffer();
         tx.seq = client->processCall(xid, proc, xdrout.get(), xargs);
-        endSend(std::move(xdrout), true);
+        sendMessage(std::move(xdrout));
         lock.lock();
 
         // XXX support oneway
@@ -206,7 +120,7 @@ call_again:
                     VLOG(3) << "thread: " << std::this_thread::get_id()
                             << " xid: " << xid
                             << ": waiting for reply";
-                    auto received = receiveMessage(
+                    auto received = processIncomingMessage(
                         tx, lock, retransmitTime - now);
                     running_ = false;
                     if (!received)
@@ -270,11 +184,11 @@ call_again:
             && reply_msg.rbody().areply().stat == SUCCESS) {
             client->processReply(
                 seq, reply_msg.rbody().areply(), xdrin.get(), xresults);
-            endReceive(std::move(xdrin), false);
+            releaseBuffer(std::move(xdrin));
             break;
         }
         else {
-            endReceive(std::move(xdrin), false);
+            releaseBuffer(std::move(xdrin));
             switch (reply_msg.rbody().stat) {
             case MSG_ACCEPTED: {
                 const auto& areply = reply_msg.rbody().areply();
@@ -332,21 +246,21 @@ call_again:
     }
 }
 
-bool Channel::receiveMessage(
+bool Channel::processIncomingMessage(
     Transaction& tx,
     std::unique_lock<std::mutex>& lock,
     std::chrono::system_clock::duration timeout)
 {
     assert(running_);
     lock.unlock();
-    auto body = beginReceive(timeout);
+    auto body = receiveMessage(timeout);
     lock.lock();
     if (!body)
         return false;
 
     rpc_msg msg;
     try {
-        xdr(msg, body.get());
+        xdr(msg, static_cast<XdrSource*>(body.get()));
     }
     catch (XdrError& e) {
         goto drop;
@@ -373,11 +287,8 @@ bool Channel::receiveMessage(
     }
     else if (msg.mtype == CALL && svcreg_) {
         lock.unlock();
-        auto reply = beginSend();
-        bool sendit = svcreg_->process(
-            std::move(msg), body.get(), reply.get());
-        endSend(std::move(reply), sendit);
-        endReceive(std::move(body), false);
+        svcreg_->process(
+            CallContext(std::move(msg), std::move(body), shared_from_this()));
         return true;
     }
 
@@ -389,56 +300,78 @@ bool Channel::receiveMessage(
             << ": dropping message";
 drop:
     lock.unlock();
-    endReceive(std::move(body), true);
+    releaseBuffer(std::move(body));
     lock.lock();
     return true;
 }
 
 LocalChannel::LocalChannel(std::shared_ptr<ServiceRegistry> svcreg)
     : Channel(svcreg),
-      bufferSize_(1500)        // XXX size
+      bufferSize_(1500),       // XXX size
+      replyChannel_(std::make_shared<ReplyChannel>(this))
 {
 }
 
-std::unique_ptr<XdrSink>
-LocalChannel::beginSend()
+std::unique_ptr<XdrMemory>
+LocalChannel::acquireBuffer()
 {
     return std::make_unique<XdrMemory>(bufferSize_);
 }
 
 void
-LocalChannel::endSend(std::unique_ptr<XdrSink>&& tmsg, bool sendit)
+LocalChannel::releaseBuffer(std::unique_ptr<XdrMemory>&& msg)
 {
-    std::unique_ptr<XdrMemory> msg(static_cast<XdrMemory*>(tmsg.release()));
-    msg->setReadSize(msg->writePos());
-    msg->rewind();
-    if (sendit) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        queue_.push_back(std::move(msg));
-    }
-}
-
-std::unique_ptr<XdrSource>
-LocalChannel::beginReceive(std::chrono::system_clock::duration timeout)
-{
-    std::unique_ptr<XdrMemory> msg;
-    {
-        std::unique_lock<std::mutex> lock(mutex_);
-        assert(queue_.front());
-        msg = std::move(queue_.front());
-        queue_.pop_front();
-    }
-    auto reply = std::make_unique<XdrMemory>(bufferSize_);
-    assert(svcreg_->process(msg.get(), reply.get()));
-    reply->setReadSize(reply->writePos());
-    reply->rewind();
-    return std::move(reply);
+    msg.reset();
 }
 
 void
-LocalChannel::endReceive(std::unique_ptr<XdrSource>&& msg, bool skip)
+LocalChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
+{
+    msg->setReadSize(msg->writePos());
+    msg->rewind();
+    rpc_msg call_msg;
+    xdr(call_msg, static_cast<XdrSource*>(msg.get()));
+    svcreg_->process(
+        CallContext(
+            std::move(call_msg), std::move(msg), replyChannel_));
+}
+
+std::unique_ptr<XdrMemory>
+LocalChannel::ReplyChannel::acquireBuffer()
+{
+    return std::make_unique<XdrMemory>(chan_->bufferSize_);
+}
+
+void
+LocalChannel::ReplyChannel::releaseBuffer(std::unique_ptr<XdrMemory>&& msg)
 {
     msg.reset();
+}
+
+void
+LocalChannel::ReplyChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
+{
+    msg->setReadSize(msg->writePos());
+    msg->rewind();
+    std::unique_lock<std::mutex>(chan_->mutex_);
+    chan_->queue_.push_back(std::move(msg));
+}
+
+std::unique_ptr<XdrMemory>
+LocalChannel::ReplyChannel::receiveMessage(
+    std::chrono::system_clock::duration timeout)
+{
+    return nullptr;
+}
+
+std::unique_ptr<XdrMemory>
+LocalChannel::receiveMessage(std::chrono::system_clock::duration timeout)
+{
+    std::unique_lock<std::mutex> lock(mutex_);
+    assert(queue_.front());
+    auto msg = std::move(queue_.front());
+    queue_.pop_front();
+    return std::move(msg);
 }
 
 SocketChannel::SocketChannel(int sock)
@@ -463,7 +396,7 @@ SocketChannel::onReadable(SocketManager* sockman)
         return true;
     running_ = true;
     try {
-        receiveMessage(nulltx, lock, 0s);
+        processIncomingMessage(nulltx, lock, 0s);
         running_ = false;
         return true;
     }
@@ -491,8 +424,8 @@ DatagramChannel::DatagramChannel(
     svcreg_ = svcreg;
 }
 
-std::unique_ptr<XdrSink>
-DatagramChannel::beginSend()
+std::unique_ptr<XdrMemory>
+DatagramChannel::acquireBuffer()
 {
     std::unique_lock<std::mutex> lock(mutex_);
     if (xdrs_) {
@@ -506,17 +439,21 @@ DatagramChannel::beginSend()
 }
 
 void
-DatagramChannel::endSend(std::unique_ptr<XdrSink>&& msg, bool sendit)
+DatagramChannel::releaseBuffer(std::unique_ptr<XdrMemory>&& msg)
 {
-    std::unique_ptr<XdrMemory> t(static_cast<XdrMemory*>(msg.release()));
-    if (sendit)
-        ::write(fd_, t->buf(), t->writePos());
     std::unique_lock<std::mutex> lock(mutex_);
-    xdrs_ = std::move(t);
+    xdrs_ = std::move(msg);
 }
 
-std::unique_ptr<XdrSource>
-DatagramChannel::beginReceive(std::chrono::system_clock::duration timeout)
+void
+DatagramChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
+{
+    ::write(fd_, msg->buf(), msg->writePos());
+    releaseBuffer(std::move(msg));
+}
+
+std::unique_ptr<XdrMemory>
+DatagramChannel::receiveMessage(std::chrono::system_clock::duration timeout)
 {
     if (!waitForReadable(timeout))
         return nullptr;
@@ -537,13 +474,6 @@ DatagramChannel::beginReceive(std::chrono::system_clock::duration timeout)
     msg->rewind();
     msg->setReadSize(bytes);
     return std::move(msg);
-}
-
-void
-DatagramChannel::endReceive(std::unique_ptr<XdrSource>&& msg, bool skip)
-{
-    std::unique_lock<std::mutex> lock(mutex_);
-    xdrs_.reset(static_cast<XdrMemory*>(msg.release()));
 }
 
 StreamChannel::StreamChannel(int sock)
@@ -570,8 +500,8 @@ StreamChannel::~StreamChannel()
 {
 }
 
-std::unique_ptr<XdrSink>
-StreamChannel::beginSend()
+std::unique_ptr<XdrMemory>
+StreamChannel::acquireBuffer()
 {
     std::unique_lock<std::mutex> lock(writeMutex_);
     std::unique_ptr<XdrMemory> msg = std::move(sendbuf_);
@@ -582,15 +512,24 @@ StreamChannel::beginSend()
 }
 
 void
-StreamChannel::endSend(std::unique_ptr<XdrSink>&& tmsg, bool sendit)
+StreamChannel::releaseBuffer(std::unique_ptr<XdrMemory>&& msg)
 {
     std::unique_lock<std::mutex> lock(writeMutex_);
-    std::unique_ptr<XdrMemory> msg;
-    msg.reset(static_cast<XdrMemory*>(tmsg.release()));
-    if (sendit) {
-        sender_->putBytes(msg->buf(), msg->writePos());
-        sender_->pushRecord();
+    // XXX: rework the receive path to use standard sized buffers
+    if (msg->bufferSize() != bufferSize_) {
+        msg.reset();
+        return;
     }
+    msg->rewind();
+    sendbuf_ = std::move(msg);
+}
+
+void
+StreamChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
+{
+    std::unique_lock<std::mutex> lock(writeMutex_);
+    sender_->putBytes(msg->buf(), msg->writePos());
+    sender_->pushRecord();
     msg->rewind();
     sendbuf_ = std::move(msg);
 }
@@ -610,8 +549,8 @@ readAll(int sock, void* buf, size_t len)
     }
 }
 
-std::unique_ptr<XdrSource>
-StreamChannel::beginReceive(std::chrono::system_clock::duration timeout)
+std::unique_ptr<XdrMemory>
+StreamChannel::receiveMessage(std::chrono::system_clock::duration timeout)
 {
     VLOG(3) << "waiting for reply";
     if (!waitForReadable(timeout))
@@ -651,17 +590,10 @@ StreamChannel::beginReceive(std::chrono::system_clock::duration timeout)
     return std::move(msg);
 }
 
-void
-StreamChannel::endReceive(std::unique_ptr<XdrSource>&& tmsg, bool skip)
-{
-    std::unique_ptr<XdrMemory> msg;
-    msg.reset(static_cast<XdrMemory*>(tmsg.release()));
-}
-
 ptrdiff_t
 StreamChannel::write(const void* buf, size_t len)
 {
-    // This will always be called via endSend with writeMutex_ held.
+    // This will always be called via sendMessage with writeMutex_ held.
     auto p = reinterpret_cast<const uint8_t*>(buf);
     auto n = len;
 
