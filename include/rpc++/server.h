@@ -27,8 +27,6 @@ public:
 
 namespace oncrpc {
 
-class Connection;
-
 typedef std::function<bool(uint32_t, XdrSource*, XdrSink*)> Service;
 
 struct ServiceEntry

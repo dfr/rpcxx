@@ -438,8 +438,7 @@ LocalChannel::beginReceive(std::chrono::system_clock::duration timeout)
 void
 LocalChannel::endReceive(std::unique_ptr<XdrSource>&& msg, bool skip)
 {
-    std::unique_ptr<XdrMemory> p(static_cast<XdrMemory*>(msg.release()));
-    p.reset();
+    msg.reset();
 }
 
 SocketChannel::SocketChannel(int sock)
