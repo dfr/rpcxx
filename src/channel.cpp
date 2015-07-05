@@ -410,6 +410,7 @@ void
 LocalChannel::endSend(std::unique_ptr<XdrSink>&& tmsg, bool sendit)
 {
     std::unique_ptr<XdrMemory> msg(static_cast<XdrMemory*>(tmsg.release()));
+    msg->setReadSize(msg->writePos());
     msg->rewind();
     if (sendit) {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -429,6 +430,7 @@ LocalChannel::beginReceive(std::chrono::system_clock::duration timeout)
     }
     auto reply = std::make_unique<XdrMemory>(bufferSize_);
     assert(svcreg_->process(msg.get(), reply.get()));
+    reply->setReadSize(reply->writePos());
     reply->rewind();
     return std::move(reply);
 }

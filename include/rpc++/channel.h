@@ -115,7 +115,7 @@ public:
     Channel();
     Channel(std::shared_ptr<ServiceRegistry> svcreg);
 
-    ~Channel();
+    virtual ~Channel();
 
     /// Make a remote procedure call
     virtual void call(

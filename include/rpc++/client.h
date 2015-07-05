@@ -18,10 +18,11 @@ class Client
 {
 public:
     Client(uint32_t program, uint32_t version);
+    virtual ~Client();
 
     uint32_t program() const { return program_; }
     uint32_t version() const { return version_; }
-    
+
     virtual void validateAuth(Channel* chan) {}
     virtual uint32_t processCall(
         uint32_t xid, uint32_t proc, XdrSink* xdrs,

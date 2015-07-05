@@ -11,6 +11,10 @@ Client::Client(uint32_t program, uint32_t version)
 {
 }
 
+Client::~Client()
+{
+}
+
 uint32_t
 Client::processCall(
     uint32_t xid, uint32_t proc, XdrSink* xdrs,

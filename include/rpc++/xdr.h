@@ -85,7 +85,7 @@ inline T __round(T len)
 class XdrSink
 {
 public:
-    ~XdrSink() {}
+    virtual ~XdrSink();
 
     /// Write a 32-bit word to the stream in network byte order
     void putWord(const uint32_t v)
@@ -155,7 +155,7 @@ protected:
 class XdrSource
 {
 public:
-    ~XdrSource() {}
+    virtual ~XdrSource();
 
     /// Read a 32-bit word from the stream
     void getWord(uint32_t& v)

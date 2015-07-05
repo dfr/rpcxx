@@ -463,4 +463,35 @@ TEST_F(ChannelTest, StreamManyThreads)
     server.stop(chan, client);
 }
 
+TEST_F(ChannelTest, BadReply)
+{
+    auto svcreg = make_shared<ServiceRegistry>();
+    auto channel = make_shared<LocalChannel>(svcreg);
+
+    auto handler = [](uint32_t proc, XdrSource* xdrin, XdrSink* xdrout)
+        {
+            uint32_t v;
+            switch (proc) {
+            case 0:
+                return true;
+            case 1:
+                xdr(v, xdrin);
+                xdr(v, xdrout);
+                return true;
+            default:
+                return false;
+            }
+        };
+    svcreg->add(1234, 1, ServiceEntry{handler, {0, 1}});
+
+    EXPECT_THROW(
+        channel->call(
+            client.get(), 1,
+            [](XdrSink* xdrs) {
+                uint32_t v = 123; xdr(v, xdrs); },
+            [](XdrSource* xdrs) {
+                uint64_t v; xdr(v, xdrs); }),
+        XdrError);
+}
+
 }

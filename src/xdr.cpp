@@ -2,6 +2,14 @@
 
 using namespace oncrpc;
 
+XdrSink::~XdrSink()
+{
+}
+
+XdrSource::~XdrSource()
+{
+}
+
 XdrMemory::XdrMemory(size_t sz)
 {
     storage_ = std::make_unique<uint8_t[]>(sz);
