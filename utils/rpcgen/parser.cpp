@@ -483,4 +483,3 @@ Parser::unexpected()
     ss << "unexpected " << Token::to_string(tok_.type());
     throw SyntaxError(tok_.loc(), ss.str());
 }
-

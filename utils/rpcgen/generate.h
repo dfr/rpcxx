@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "utils/rpcgen/parser.h"
+#include "utils/rpcgen/utils.h"
 
 namespace oncrpc {
 namespace rpcgen {
@@ -29,9 +30,6 @@ public:
     GenerateTypes(ostream& str)
         : GenerateBase(str)
     {
-        str_ << "constexpr int FALSE = false;" << endl;
-        str_ << "constexpr int TRUE = true;" << endl;
-        str_ << endl;
     }
 
     void visit(TypeDefinition* def) override
@@ -138,34 +136,29 @@ public:
             });
         --indent;
         str_ << "}" << endl << endl;
-        
+
     }
 };
 
-/// Return the length of the longest common prefix
-static int
-longestCommonPrefix(const vector<string>& methods)
+class GenerateInterface: public GenerateBase
 {
-    if (methods.size() == 0)
-        return 0;
+public:
+    GenerateInterface(ostream& str)
+        : GenerateBase(str)
+    {
+    }
 
-    string prefix = methods[0];
-    for (auto i = methods.begin() + 1; i != methods.end(); ++i) {
-        const string& s = *i;
-        while (prefix.size() > 0 && s.find(prefix) != 0) {
-            prefix = prefix.substr(0, prefix.size() - 1);
+    void visit(ProgramDefinition* def) override
+    {
+        str_ << "constexpr int " << def->name()
+             << " = " << def->prog() << ";" << endl;
+        str_ << endl;
+
+        for (const auto& ver: *def) {
+            ver->printInterface(Indent(), def, str_);
         }
     }
-    return prefix.size();
-}
-
-static void
-lcase(string& s)
-{
-    transform(s.begin(), s.end(), s.begin(),
-              [](char ch) {return std::tolower(ch);});
-
-}
+};
 
 class GenerateClient: public GenerateBase
 {
@@ -175,97 +168,26 @@ public:
     {
     }
 
-    virtual void visit(ProgramDefinition* def)
+    void visit(ProgramDefinition* def) override
     {
-        str_ << "constexpr int " << def->name()
-             << " = " << def->prog() << ";" << endl;
-        str_ << endl;
-
-        string baseClassName = def->name();
-        lcase(baseClassName);
-
         for (const auto& ver: *def) {
-            str_ << "constexpr int " << ver->name()
-                 << " = " << ver->vers() << ";" << endl;
-            str_ << endl;
-            vector<string> methods;
-            for (const auto& proc: *ver) {
-                methods.push_back(proc->name());
-                str_ << "constexpr int " << proc->name()
-                     << " = " << proc->proc() << ";" << endl;
-            }
-            str_ << endl;
-            int prefixlen = longestCommonPrefix(methods);
+            ver->printClientStubs(Indent(), def, str_);
+        }
+    }
+};
 
-            string className = baseClassName + "_" + to_string(ver->vers());
-            str_ << "class " << className << " {" << endl;
-            Indent indent(1);
-            str_ << indent << className
-                 << "(" << endl;
-            ++indent;
-            str_ << indent
-                 << "std::shared_ptr<oncrpc::Channel> channel," << endl;
-            str_ << indent
-                 << "std::unique_ptr<oncrpc::Auth> auth = nullptr)" << endl;
-            str_ << indent << ": channel_(channel)," << endl;
-            str_ << indent << "  state_(" << def->name()
-                 << ", " << ver->name() << ", auth)" << endl;
-            --indent;
-            str_ << indent << "{}" << endl;
-            str_ << "public:" << endl;
-            for (const auto& proc: *ver) {
-                string methodName = proc->name().substr(prefixlen);
-                lcase(methodName);
-                str_ << indent << *proc->retType() << " " << methodName;
-                str_ << "(";
-                string sep = "";
-                int i = 0;
-                for (const auto& argType: *proc) {
-                    if (argType == Parser::voidType())
-                        continue;
-                    str_ << sep << "const " << *argType << "& _arg" << i;
-                    sep = ", ";
-                    i++;
-                }
-                str_ << ")" << endl;
-                str_ << indent << "{" << endl;
-                ++indent;
-                if (proc->retType() != Parser::voidType())
-                    str_ << indent << *proc->retType() << " _ret;" << endl;
-                str_ << indent << "channel_->call(" << endl;
-                ++indent;
-                str_ << indent << "state_, "
-                     << proc->name() << "," << endl;
-                str_ << indent << "[&](oncrpc::XdrSink* xdrs) {" << endl;
-                ++indent;
-                i = 0;
-                for (const auto& argType: *proc) {
-                    if (argType == Parser::voidType())
-                        continue;
-                    str_ << indent << "xdr(_arg" << i << ", xdrs);" << endl;
-                    i++;
-                }
-                --indent;
-                str_ << indent << "}," << endl;
-                str_ << indent << "[&](oncrpc::XdrSource* xdrs) {" << endl;
-                ++indent;
-                if (proc->retType() != Parser::voidType())
-                    str_ << indent << "xdr(_res, xdrs);" << endl;
-                --indent;
-                str_ << indent << "});" << endl;
-                --indent;
-                if (proc->retType() != Parser::voidType())
-                    str_ << indent << "return std::move(_res);" << endl;
-                --indent;
-                str_ << indent << "}" << endl;
-            }
-            str_ << "private:" << endl;
-            str_ << indent
-                 << "std::shared_ptr<oncrpc::Channel> channel_;" << endl
-                 << indent
-                 << "CallState state_;" << endl;
-            str_ << "};" << endl;
-            str_ << endl;
+class GenerateServer: public GenerateBase
+{
+public:
+    GenerateServer(ostream& str)
+        : GenerateBase(str)
+    {
+    }
+
+    void visit(ProgramDefinition* def) override
+    {
+        for (const auto& ver: *def) {
+            ver->printServerStubs(Indent(), def, str_);
         }
     }
 };

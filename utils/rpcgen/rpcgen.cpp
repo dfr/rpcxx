@@ -7,39 +7,15 @@
 
 #include "utils/rpcgen/generate.h"
 #include "utils/rpcgen/parser.h"
+#include "utils/rpcgen/utils.h"
 
 using namespace oncrpc::rpcgen;
 using namespace std;
 
 [[noreturn]] void usage()
 {
-    cerr << "usage: rpcgen [-t] [-x] [-c] [-n namespace] file.x" << endl;
+    cerr << "usage: rpcgen [-t] [-x] [-i] [-c] [-n namespace] file.x" << endl;
     exit(1);
-}
-
-static vector<string>
-parseNamespaces(const string& namespaces)
-{
-    string ns = namespaces;
-    vector<string> res;
-    size_t i;
-    while ((i = ns.find("::")) != string::npos) {
-        res.push_back(ns.substr(0, i));
-        ns = ns.substr(i + 2);
-    }
-    res.push_back(ns);
-    for (const auto& s: res) {
-        if (s.size() == 0 ||
-            !(std::isalpha(s[0]) || s[0] == '_') ||
-            !all_of(s.begin() + 1, s.end(),
-                    [](char ch) {
-                        return std::isalnum(ch) || ch == '_';
-                    })) {
-            cerr << "rpcgen: malformed namespace: " << namespaces << endl;
-            exit(1);
-        }
-    }
-    return res;
 }
 
 int
@@ -47,11 +23,13 @@ main(int argc, char* const argv[])
 {
     bool generateTypes = false;
     bool generateXdr = false;
+    bool generateInterface = false;
     bool generateClient = false;
+    bool generateServer = false;
     vector<string> namespaces;
     int opt;
 
-    while ((opt = getopt(argc, argv, "txcn:")) != -1) {
+    while ((opt = getopt(argc, argv, "txicsn:")) != -1) {
         switch (opt) {
         case 't':
             generateTypes = true;
@@ -61,12 +39,26 @@ main(int argc, char* const argv[])
             generateXdr = true;
             break;
 
+        case 'i':
+            generateInterface = true;
+            break;
+
         case 'c':
             generateClient = true;
             break;
 
+        case 's':
+            generateServer = true;
+            break;
+
         case 'n':
-            namespaces = parseNamespaces(optarg);
+            try {
+                namespaces = parseNamespaces(optarg);
+            }
+            catch (runtime_error& e) {
+                cerr << e.what() << endl;
+                return 1;
+            }
             break;
 
         case '?':
@@ -77,7 +69,7 @@ main(int argc, char* const argv[])
     argc -= optind;
     argv += optind;
 
-    if (!(generateTypes || generateXdr || generateClient))
+    if (!(generateTypes || generateXdr || generateInterface || generateClient))
         usage();
 
     if (argc != 1)
@@ -97,10 +89,12 @@ main(int argc, char* const argv[])
         str << "#include <string>" << endl;
         str << "#include <vector>" << endl;
         str << "#include <rpc++/xdr.h>" << endl;
-        if (generateClient)
+        if (generateClient) {
+            str << "#include <rpc++/channel.h>" << endl;
             str << "#include <rpc++/client.h>" << endl;
-        str << endl;
-        
+            str << "#include <rpc++/util.h>" << endl;
+        }
+
         for (const auto& ns: namespaces)
             str << "namespace " << ns << " {" << endl;
 
@@ -114,8 +108,16 @@ main(int argc, char* const argv[])
             GenerateXdr gen(str);
             spec->visit(&gen);
         }
+        if (generateInterface) {
+            GenerateInterface gen(str);
+            spec->visit(&gen);
+        }
         if (generateClient) {
             GenerateClient gen(str);
+            spec->visit(&gen);
+        }
+        if (generateServer) {
+            GenerateServer gen(str);
             spec->visit(&gen);
         }
 
