@@ -1,6 +1,7 @@
 #include <sstream>
 
 #include <rpc++/errors.h>
+#include <rpc++/rpcproto.h>
 
 using namespace oncrpc;
 
@@ -58,7 +59,7 @@ ProtocolMismatch::ProtocolMismatch(uint32_t minver, uint32_t maxver)
 {
 }
 
-AuthError::AuthError(auth_stat stat)
+AuthError::AuthError(int stat)
     : RpcError([stat]() {
             static const char* str[] = {
                 "AUTH_OK",

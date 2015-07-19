@@ -49,19 +49,19 @@ Channel::call(
     Client* client, uint32_t proc,
     std::function<void(XdrSink*)> xargs,
     std::function<void(XdrSource*)> xresults,
+    Protection prot,
     std::chrono::system_clock::duration timeout)
 {
     int nretries = 0;
     auto retransmitInterval = retransmitInterval_;
 
-    client->validateAuth(this);
-
 call_again:
+    int gen = client->validateAuth(this);
+
     std::unique_lock<std::mutex> lock(mutex_);
 
     auto xid = xid_++;
-    VLOG(3) << "thread: " << std::this_thread::get_id()
-            << " xid: " << xid << ": new call";
+    VLOG(3) << "xid: " << xid << ": new call";
     auto i = pending_.emplace(xid, std::move(Transaction()));
     auto& tx = i.first->second;
     tx.xid = xid;
@@ -73,7 +73,9 @@ call_again:
         // Drop the lock while we transmit
         lock.unlock();
         auto xdrout = acquireBuffer();
-        tx.seq = client->processCall(xid, proc, xdrout.get(), xargs);
+        if (!client->processCall(
+            xid, tx.seq, proc, xdrout.get(), xargs, prot))
+            goto call_again;
         sendMessage(std::move(xdrout));
         lock.lock();
 
@@ -93,9 +95,7 @@ call_again:
                     // Someone else is reading replies, wait until they wake
                     // us or until we time out.
                     auto timeoutDuration = retransmitTime - now;
-                    VLOG(3) << "thread: " << std::this_thread::get_id()
-                            << " xid: " << xid
-                            << ": waiting for other thread: "
+                    VLOG(3) << "xid: " << xid << ": waiting for other thread: "
                             << std::chrono::duration_cast<std::chrono::milliseconds>(timeoutDuration).count()
                             << "ms";
                     tx.sleeping = true;
@@ -109,17 +109,14 @@ call_again:
                         }
                     }
                     else {
-                        VLOG(3) << "thread: " << std::this_thread::get_id()
-                                << " xid: " << xid
+                        VLOG(3) << "xid: " << xid
                                 << ": timed out waiting for other thread";
                         break;
                     }
                 }
                 else {
                     running_ = true;
-                    VLOG(3) << "thread: " << std::this_thread::get_id()
-                            << " xid: " << xid
-                            << ": waiting for reply";
+                    VLOG(3) << "xid: " << xid << ": waiting for reply";
                     auto received = processIncomingMessage(
                         tx, lock, retransmitTime - now);
                     running_ = false;
@@ -142,9 +139,7 @@ call_again:
                 pending_.erase(xid);
                 throw RpcError("call timeout");
             }
-            VLOG(3) << "thread: " << std::this_thread::get_id()
-                    << " xid: " << xid
-                    << ": retransmitting";
+            VLOG(3) << "xid: " << xid << ": retransmitting";
             nretries++;
             if (retransmitInterval < maxBackoff)
                 retransmitInterval *= 2;
@@ -152,8 +147,7 @@ call_again:
         }
 
         assert(tx.reply.xid == xid);
-        VLOG(3) << "thread: " << std::this_thread::get_id()
-                << " xid: " << xid << ": reply received";
+        VLOG(3) << "xid: " << xid << ": reply received";
 
         auto reply_msg = std::move(tx.reply);
         auto xdrin = std::move(tx.body);
@@ -171,8 +165,7 @@ call_again:
             }
             if (liveThreads == 0) {
                 auto i = pending_.begin();
-                VLOG(3) << "thread: " << std::this_thread::get_id()
-                        << " waking thread for" << " xid: " << i->first;
+                VLOG(3) << "waking thread for " << "xid: " << i->first;
                 i->second.cv->notify_one();
             }
         }
@@ -182,8 +175,10 @@ call_again:
         if (reply_msg.mtype == REPLY
             && reply_msg.rbody().stat == MSG_ACCEPTED
             && reply_msg.rbody().areply().stat == SUCCESS) {
-            client->processReply(
-                seq, reply_msg.rbody().areply(), xdrin.get(), xresults);
+            if (!client->processReply(
+                seq, gen, reply_msg.rbody().areply(), xdrin.get(),
+                xresults, prot))
+                goto call_again;
             releaseBuffer(std::move(xdrin));
             break;
         }
@@ -229,7 +224,7 @@ call_again:
                         rreply.rpc_mismatch.high);
 
                 case AUTH_ERROR:
-                    if (client->authError(rreply.auth_error))
+                    if (client->authError(gen, rreply.auth_error))
                         goto call_again;
                     throw AuthError(rreply.auth_error);
 
@@ -273,9 +268,7 @@ bool Channel::processIncomingMessage(
         }
         // This may be some other thread's reply. Find them and
         // wake them up to process it
-        VLOG(3) << "thread: " << std::this_thread::get_id()
-                << " xid: " << tx.reply.xid
-                << ": finding transaction";
+        VLOG(3) << "xid: " << msg.xid << ": finding transaction";
         auto i = pending_.find(msg.xid);
         if (i != pending_.end()) {
             auto& other = i->second;
@@ -295,9 +288,7 @@ bool Channel::processIncomingMessage(
     // If we don't have a matching transaction, drop the message
     // If we don't find the transaction, just drop
     // it. This can happen for retransmits.
-    VLOG(3) << "thread: " << std::this_thread::get_id()
-            << " xid: " << msg.xid
-            << ": dropping message";
+    VLOG(3) << "xid: " << msg.xid << ": dropping message";
 drop:
     lock.unlock();
     releaseBuffer(std::move(body));
@@ -353,8 +344,8 @@ LocalChannel::ReplyChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
 {
     msg->setReadSize(msg->writePos());
     msg->rewind();
-    std::unique_lock<std::mutex>(chan_->mutex_);
-    chan_->queue_.push_back(std::move(msg));
+    std::unique_lock<std::mutex> lock(chan_->mutex_);
+    chan_->queue_.emplace_back(std::move(msg));
 }
 
 std::unique_ptr<XdrMemory>
@@ -368,7 +359,8 @@ std::unique_ptr<XdrMemory>
 LocalChannel::receiveMessage(std::chrono::system_clock::duration timeout)
 {
     std::unique_lock<std::mutex> lock(mutex_);
-    assert(queue_.front());
+    if (queue_.size() == 0)
+        return nullptr;
     auto msg = std::move(queue_.front());
     queue_.pop_front();
     return std::move(msg);

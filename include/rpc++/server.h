@@ -9,6 +9,8 @@
 #include <vector>
 
 #include <rpc++/channel.h>
+#include <rpc++/errors.h>
+#include <rpc++/gss.h>
 
 namespace std {
 
@@ -31,6 +33,92 @@ class CallContext;
 
 typedef std::function<void(CallContext&&)> Service;
 
+namespace _detail {
+
+class SequenceWindow
+{
+public:
+    SequenceWindow(int size);
+
+    int size() const { return size_; }
+    void update(uint32_t seq);
+    void reset(uint32_t seq);
+    bool valid(uint32_t seq);
+
+private:
+    int size_;
+    uint32_t largestSeen_;
+    std::deque<uint32_t> valid_;
+};
+
+class GssClientContext
+{
+public:
+    GssClientContext();
+    ~GssClientContext();
+
+    void controlMessage(CallContext& ctx);
+
+    bool verifyCall(CallContext& ctx);
+
+    template <typename F>
+    void getArgs(F&& fn, GssCred& cred, XdrSource* xdrs)
+    {
+        if (cred.proc == GssProc::DATA) {
+            std::unique_lock<std::mutex> lock(mutex_);
+            decodeBody(
+                context_, mechType_, cred.service, cred.sequence, fn, xdrs);
+        }
+        else {
+            fn(xdrs);
+        }
+    }
+
+    template <typename F>
+    bool sendReply(F&& fn, GssCred& cred, XdrSink* xdrs)
+    {
+        if (cred.proc == GssProc::DATA) {
+            std::unique_lock<std::mutex> lock(mutex_);
+            try {
+                encodeBody(
+                    context_, mechType_, cred.service, cred.sequence, fn, xdrs);
+            }
+            catch (RpcError& e) {
+                return false;
+            }
+        }
+        else {
+            fn(xdrs);
+        }
+        return true;
+    }
+
+    bool getVerifier(CallContext& ctx, opaque_auth& verf);
+
+    uint32_t id() const { return id_; }
+
+    auto expiry() const { return expiry_; }
+
+    void setExpiry(std::chrono::system_clock::time_point expiry)
+    {
+        expiry_ = expiry;
+    }
+
+private:
+    static uint32_t nextId_;    // XXX atomic?
+
+    uint32_t id_;
+    std::mutex mutex_;
+    bool established_ = false;
+    std::chrono::system_clock::time_point expiry_;
+    SequenceWindow sequenceWindow_;
+    gss_ctx_id_t context_ = GSS_C_NO_CONTEXT;
+    gss_name_t clientName_ = GSS_C_NO_NAME;
+    gss_OID mechType_ = GSS_C_NO_OID;
+};
+
+}
+
 class CallContext
 {
 public:
@@ -49,19 +137,28 @@ public:
             chan_->releaseBuffer(std::move(args_));
     }
 
-    void setService(Service svc) { svc_ = svc; }
+    void setService(Service svc)
+    {
+        svc_ = svc;
+    }
+
+    void setClient(std::shared_ptr<_detail::GssClientContext> client)
+    {
+        client_ = client;
+    }
 
     const rpc_msg& msg() const { return msg_; }
     uint32_t prog() const { return msg_.cbody().prog; }
     uint32_t vers() const { return msg_.cbody().vers; }
     uint32_t proc() const { return msg_.cbody().proc; }
+    GssCred& gsscred() { return gsscred_; }
 
     void run()
     {
         try {
             svc_(std::move(*this));
         }
-        catch (XdrError& e) {
+        catch (RpcError& e) {
             garbageArgs();
         }
     }
@@ -69,7 +166,12 @@ public:
     template <typename F>
     void getArgs(F&& fn)
     {
-        fn(static_cast<XdrSource*>(args_.get()));
+        if (client_) {
+            client_->getArgs(fn, gsscred_, args_.get());
+        }
+        else {
+            fn(static_cast<XdrSource*>(args_.get()));
+        }
         chan_->releaseBuffer(std::move(args_));
     }
 
@@ -77,12 +179,23 @@ public:
     void sendReply(F&& fn)
     {
         accepted_reply areply;
-        areply.verf = { AUTH_NONE, {} };
+        if (!getVerifier(areply.verf))
+            return;
         areply.stat = SUCCESS;
         rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
         auto reply = chan_->acquireBuffer();
         xdr(reply_msg, static_cast<XdrSink*>(reply.get()));
-        fn(reply.get());
+        if (client_) {
+            // RFC 2203: 5.3.3.4: If we get an error encoding the reply body,
+            // discard the reply.
+            if (!client_->sendReply(fn, gsscred_, reply.get())) {
+                chan_->releaseBuffer(std::move(reply));
+                return;
+            }
+        }
+        else {
+            fn(static_cast<XdrSink*>(reply.get()));
+        }
         chan_->sendMessage(std::move(reply));
     }
 
@@ -101,7 +214,8 @@ public:
     void garbageArgs()
     {
         accepted_reply areply;
-        areply.verf = { AUTH_NONE, {} };
+        if (!getVerifier(areply.verf))
+            return;
         areply.stat = GARBAGE_ARGS;
         rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
         auto reply = chan_->acquireBuffer();
@@ -112,7 +226,8 @@ public:
     void procedureUnavailable()
     {
         accepted_reply areply;
-        areply.verf = { AUTH_NONE, {} };
+        if (!getVerifier(areply.verf))
+            return;
         areply.stat = PROC_UNAVAIL;
         rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
         auto reply = chan_->acquireBuffer();
@@ -123,7 +238,8 @@ public:
     void programUnavailable()
     {
         accepted_reply areply;
-        areply.verf = { AUTH_NONE, {} };
+        if (!getVerifier(areply.verf))
+            return;
         areply.stat = PROG_UNAVAIL;
         rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
         auto reply = chan_->acquireBuffer();
@@ -134,7 +250,8 @@ public:
     void versionMismatch(int low, int high)
     {
         accepted_reply areply;
-        areply.verf = { AUTH_NONE, {} };
+        if (!getVerifier(areply.verf))
+            return;
         areply.stat = PROG_MISMATCH;
         auto& mi = areply.mismatch_info;
         mi.low = low;
@@ -145,9 +262,34 @@ public:
         chan_->sendMessage(std::move(reply));
     }
 
+    void authError(auth_stat stat)
+    {
+        rejected_reply rreply;
+        rreply.stat = AUTH_ERROR;
+        rreply.auth_error = stat;
+        rpc_msg reply_msg(msg_.xid, std::move(rreply));
+        auto reply = chan_->acquireBuffer();
+        xdr(reply_msg, static_cast<XdrSink*>(reply.get()));
+        chan_->sendMessage(std::move(reply));
+    }
+
 private:
+    bool getVerifier(opaque_auth& verf)
+    {
+        if (client_) {
+            return client_->getVerifier(*this, verf);
+        }
+        else {
+            verf = { AUTH_NONE, {} };
+            return true;
+        }
+    }
+
     /// RPC Message for this call
     rpc_msg msg_;
+
+    /// Decoded RPCSEC_GSS credentials
+    GssCred gsscred_;
 
     /// Xdr encoded arguments for the call
     std::unique_ptr<XdrMemory> args_;
@@ -157,24 +299,46 @@ private:
 
     /// Service handler
     Service svc_;
+
+    /// RPCSEC_GSS client context
+    std::shared_ptr<_detail::GssClientContext> client_;
 };
 
 class ServiceRegistry
 {
 public:
+    ServiceRegistry();
+
+    /// Add a handler to the registry
     void add(uint32_t prog, uint32_t vers, Service&& svc);
 
+    /// Remove the handler for the given program and version
     void remove(uint32_t prog, uint32_t vers);
 
+    /// Look up a service handler for the given program and version
     const Service lookup(uint32_t prog, uint32_t vers) const;
 
-    // Process an RPC message and possibly dispatch to a suitable handler
+    /// Process an RPC message and possibly dispatch to a suitable handler
     void process(CallContext&& ctx);
 
+    /// Used in unit tests to force RPCSEC_GSS to re-initialise its context
+    void clearClients();
+
+    /// Used in unit tests to force client expiry
+    void setClientLifetime(std::chrono::system_clock::duration lifetime)
+    {
+        clientLifetime_ = lifetime;
+    }
+
 private:
+    bool validateAuth(CallContext& ctx);
+
     mutable std::mutex mutex_;
+    std::chrono::system_clock::duration clientLifetime_;
     std::unordered_map<uint32_t, std::unordered_set<uint32_t>> programs_;
     std::unordered_map<std::pair<uint32_t, uint32_t>, Service> services_;
+    std::unordered_map<
+        uint32_t, std::shared_ptr<_detail::GssClientContext>> clients_;
 };
 
 }

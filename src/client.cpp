@@ -15,38 +15,50 @@ Client::~Client()
 {
 }
 
-uint32_t
-Client::processCall(
-    uint32_t xid, uint32_t proc, XdrSink* xdrs,
-    std::function<void(XdrSink*)> xargs)
+int
+Client::validateAuth(Channel* chan)
 {
+    return 0;
+}
+
+bool
+Client::processCall(
+    uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
+    std::function<void(XdrSink*)> xargs, Protection prot)
+{
+    if (prot != Protection::DEFAULT && prot != Protection::NONE) {
+        throw RpcError("unsupported protection");
+    }
     encodeCall(xid, proc, xdrs);
     xdrs->putWord(AUTH_NONE);
     xdrs->putWord(0);
     xdrs->putWord(AUTH_NONE);
     xdrs->putWord(0);
     xargs(xdrs);
-    return 0;
+    seq = 0;
+    return true;
 }
 
 bool
 Client::processReply(
-    uint32_t seq, accepted_reply& areply,
-    XdrSource* xdrs, std::function<void(XdrSource*)> xresults)
+    uint32_t seq, int gen, accepted_reply& areply,
+    XdrSource* xdrs, std::function<void(XdrSource*)> xresults, Protection prot)
 {
+    if (prot != Protection::DEFAULT && prot != Protection::NONE) {
+        throw RpcError("unsupported protection");
+    }
     xresults(xdrs);
     return true;
 }
 
 bool
-Client::authError(auth_stat stat)
+Client::authError(int gen, int stat)
 {
-    assert(false);
+    return false;
 }
 
 void
-Client::encodeCall(
-    uint32_t xid, uint32_t proc, XdrSink* xdrs)
+Client::encodeCall(uint32_t xid, uint32_t proc, XdrSink* xdrs)
 {
     // Derived classes should call this before encoding cred and verf
     XdrWord* p = xdrs->writeInline<XdrWord>(6 * sizeof(XdrWord));
@@ -116,16 +128,20 @@ SysClient::SysClient(uint32_t program, uint32_t version)
     cred_.resize(xdrs->writePos());
 }
 
-uint32_t
+bool
 SysClient::processCall(
-    uint32_t xid, uint32_t proc, XdrSink* xdrs,
-    std::function<void(XdrSink*)> xargs)
+    uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
+    std::function<void(XdrSink*)> xargs, Protection prot)
 {
+    if (prot != Protection::DEFAULT && prot != Protection::NONE) {
+        throw RpcError("unsupported protection");
+    }
     encodeCall(xid, proc, xdrs);
-    xdrs->putWord(AUTH_NONE);
+    xdrs->putWord(AUTH_SYS);
     xdr(cred_, xdrs);
     xdrs->putWord(AUTH_NONE);
     xdrs->putWord(0);
     xargs(xdrs);
-    return 0;
+    seq = 0;
+    return true;
 }

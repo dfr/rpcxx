@@ -4,8 +4,6 @@
 
 #include <string>
 
-#include <rpc++/rpcproto.h>
-
 namespace oncrpc {
 
 class Channel;
@@ -20,6 +18,20 @@ public:
 
     RpcError(const char* what)
         : std::runtime_error(what)
+    {
+    }
+};
+
+class XdrError: public RpcError
+{
+public:
+    XdrError(const std::string& what)
+        : RpcError(what)
+    {
+    }
+
+    XdrError(const char* what)
+        : RpcError(what)
     {
     }
 };
@@ -94,12 +106,13 @@ private:
 class AuthError: public RpcError
 {
 public:
-    AuthError(auth_stat stat);
+    /// The argument is actually an auth_stat enum defined in rpcproto.h
+    AuthError(int stat);
 
-    auth_stat stat() const { return stat_; }
+    int stat() const { return stat_; }
 
 private:
-    auth_stat stat_;
+    int stat_;
 };
 
 }

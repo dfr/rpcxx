@@ -60,6 +60,8 @@ public:
         cbody.prog = prog;
         cbody.vers = vers;
         cbody.proc = proc;
+        cbody.cred = { AUTH_NONE, {} };
+        cbody.verf = { AUTH_NONE, {} };
         rpc_msg msg(1, std::move(cbody));
         auto xdrout = chan.acquireBuffer();
         xdr(msg, static_cast<XdrSink*>(xdrout.get()));

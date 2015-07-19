@@ -8,19 +8,70 @@
 #include <rpc++/util.h>
 
 using namespace oncrpc;
-using namespace oncrpc::_gssdetail;
+using namespace oncrpc::_detail;
 using namespace std;
+
+namespace {
+
+// Special client which is used during context initialisation. Having it
+// separate simplfies the logic in GssClient and makes it easier to lock.
+class ContextClient: public Client
+{
+public:
+    ContextClient(
+        uint32_t program, uint32_t version, const GssCred& cred)
+        : Client(program, version),
+          cred_(cred)
+    {
+    }
+
+    bool processCall(
+        uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
+        std::function<void(XdrSink*)> xargs, Protection prot) override
+    {
+        uint32_t credlen = 5 * sizeof(XdrWord) + __round(cred_.handle.size());
+        XdrMemory xdrcred(credlen);
+        xdr(cred_, static_cast<XdrSink*>(&xdrcred));
+
+        encodeCall(xid, proc, xdrs);
+        xdrs->putWord(RPCSEC_GSS);
+        xdrs->putWord(credlen);
+        xdrs->putBytes(xdrcred.buf(), credlen);
+        xdrs->putWord(AUTH_NONE);
+        xdrs->putWord(0);
+        xargs(xdrs);
+        seq = 0;
+        return true;
+    }
+
+    bool processReply(
+        uint32_t seq, int gen, accepted_reply& areply,
+        XdrSource* xdrs, std::function<void(XdrSource*)> xresults,
+        Protection prot) override
+    {
+        verf_ = move(areply.verf.auth_body);
+        xresults(xdrs);
+        return true;
+    }
+
+    const GssCred& cred_;
+    vector<uint8_t> verf_;
+};
+
+}
 
 GssClient::GssClient(
     uint32_t program, uint32_t version,
     const string& principal,
     const string& mechanism,
-    rpc_gss_service_t service)
+    GssService service)
     : Client(program, version),
       context_(GSS_C_NO_CONTEXT),
       cred_(GSS_C_NO_CREDENTIAL),
       principal_(GSS_C_NO_NAME),
-      state_{ 1, RPCSEC_GSS_INIT, 1, service }
+      established_(false),
+      sequence_(1),
+      defaultService_(service)
 {
     static gss_OID_desc krb5_desc =
         {9, (void *)"\x2a\x86\x48\x86\xf7\x12\x01\x02\x02"};
@@ -55,20 +106,34 @@ GssClient::~GssClient()
 }
 
 void
+GssClient::setService(GssService service)
+{
+    defaultService_ = service;
+}
+
+int
 GssClient::validateAuth(Channel* channel)
 {
     uint32_t maj_stat, min_stat;
 
-    if (context_ != GSS_C_NO_CONTEXT)
-        return;
+    std::unique_lock<std::mutex> lock(mutex_);
 
-    VLOG(2) << "Creating GSS-API context";
+    if (established_) {
+        VLOG(3) << "Context is valid";
+        return generation_;
+    }
+
+    generation_++;
+    VLOG(2) << "Creating GSS-API context, generation " << generation_;
 
     // Establish the GSS-API context with the remote service
-    vector<uint8_t> input_token;
-    gss_buffer_desc output_token { 0, nullptr };
-    while (state_.gss_proc != RPCSEC_GSS_DATA || input_token.size() > 0) {
-        gss_buffer_desc tmp {input_token.size(), input_token.data() };
+    vector<uint8_t> inputToken;
+    gss_buffer_desc outputToken { 0, nullptr };
+    GssCred cred{ 1, GssProc::INIT, 1, GssService::NONE, {}};
+    ContextClient client(program_, version_, cred);
+    while (!established_ || inputToken.size() > 0) {
+        gss_buffer_desc tmp {inputToken.size(), inputToken.data() };
+        uint32_t flags;
         maj_stat = gss_init_sec_context(
             &min_stat,
             cred_,
@@ -80,84 +145,100 @@ GssClient::validateAuth(Channel* channel)
             GSS_C_NO_CHANNEL_BINDINGS,
             &tmp,
             nullptr,
-            &output_token,
-            nullptr,
+            &outputToken,
+            &flags,
             nullptr);
+        assert(!(flags & (GSS_C_SEQUENCE_FLAG|GSS_C_REPLAY_FLAG)));
         if (maj_stat != GSS_S_COMPLETE &&
             maj_stat != GSS_S_CONTINUE_NEEDED) {
             reportError(mech_, maj_stat, min_stat);
         }
-        input_token = {};
+        inputToken = {};
 
-        if (output_token.length > 0) {
+        if (outputToken.length > 0) {
             VLOG(2) << "Sending "
-                    << (state_.gss_proc == RPCSEC_GSS_INIT
-                        ? "RPCSEC_GSS_INIT" : "RPCSEC_GSS_CONTINUE_INIT")
-                    << " with " << output_token.length << " byte token";
-            rpc_gss_init_res res;
+                    << (cred.proc == GssProc::INIT
+                        ? "GssProc::INIT" : "GssProc::CONTINUE_INIT")
+                    << " with " << outputToken.length << " byte token";
+            GssInitResult res;
             channel->call(
-                this, 0,
-                [&output_token](XdrSink* xdrs) {
+                &client, 0,
+                [&outputToken](XdrSink* xdrs) {
                     // We free the output token as soon as we have written
                     // it to the stream so that we don't have to worry
                     // about it if the channel throws an exception
-                    xdrs->putWord(output_token.length);
-                    xdrs->putBytes(output_token.value, output_token.length);
+                    xdrs->putWord(outputToken.length);
+                    xdrs->putBytes(outputToken.value, outputToken.length);
                     uint32_t min_stat;
-                    gss_release_buffer(&min_stat, &output_token);
+                    gss_release_buffer(&min_stat, &outputToken);
                 },
                 [&res](XdrSource* xdrs) {
                     xdr(res, xdrs);
                 });
 
-            if (GSS_ERROR(res.gss_major)) {
-                reportError(mech_, res.gss_major, res.gss_minor);
+            if (GSS_ERROR(res.major)) {
+                reportError(mech_, res.major, res.minor);
             }
 
-            VLOG(2) << "Received " << res.gss_token.size() << " byte token";
-            input_token = move(res.gss_token);
-            state_.handle = move(res.handle);
-            seq_window_ = res.seq_window;
+            VLOG(2) << "Received " << res.token.size() << " byte token";
+            inputToken = move(res.token);
+            handle_ = move(res.handle);
+            cred.handle = handle_;
+            sequenceWindow_ = res.sequenceWindow;
+            inflightCalls_ = 0;
 
-            if (res.gss_major == GSS_S_COMPLETE) {
-                state_.gss_proc = RPCSEC_GSS_DATA;
+            if (res.major == GSS_S_COMPLETE) {
+                established_ = true;
             }
             else {
-                state_.gss_proc = RPCSEC_GSS_CONTINUE_INIT;
+                cred.proc = GssProc::CONTINUE_INIT;
             }
         }
     }
 
-    // We saved the RPC reply verf field in validate below. Use it to
+    // We saved the RPC reply verf field in the ContextClient. Use it to
     // verify the sequence window returned by the server
-    XdrWord seq(seq_window_);
+    XdrWord seq(sequenceWindow_);
     gss_qop_t qop;
     gss_buffer_desc message{ sizeof(uint32_t), seq.data() };
-    gss_buffer_desc token{ verf_.size(), verf_.data() };
+    gss_buffer_desc token{ client.verf_.size(), client.verf_.data() };
     maj_stat = gss_verify_mic(
         &min_stat, context_, &message, &token, &qop);
     if (GSS_ERROR(maj_stat)) {
         reportError(mech_, maj_stat, min_stat);
     }
-    verf_ = {};
     // XXX verify qop here
+
+    VLOG(2) << "Finished establishing context, window size "
+            << sequenceWindow_;
+    return generation_;
 }
 
-uint32_t
+bool
 GssClient::processCall(
-    uint32_t xid, uint32_t proc, XdrSink* xdrs,
-    std::function<void(XdrSink*)> xargs)
+    uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
+    std::function<void(XdrSink*)> xargs, Protection prot)
 {
-    int seq = 0;
+    seq = 0;
 
-    if (state_.gss_proc == RPCSEC_GSS_DATA) {
-        seq = ++state_.seq_num;
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (!established_) {
+        // Someone else has deleted the context so we need to re-validate
+        VLOG(2) << "Can't process call: context deleted";
+        return false;
     }
+    while (inflightCalls_ >= sequenceWindow_) {
+        VLOG(2) << "Waiting for a slot in the sequence window";
+        cv_.wait(lock);
+    }
+    inflightCalls_++;
+    seq = ++sequence_;
+    auto service = getService(prot);
+    VLOG(3) << "sending message with service " << int(service);
 
     // More than enough space for the call and cred
     uint8_t callbuf[512];
-    uint32_t credlen = 5 * sizeof(XdrWord) + __round(state_.handle.size());
-    assert(credlen == XdrSizeof(state_));
+    uint32_t credlen = 5 * sizeof(XdrWord) + __round(handle_.size());
     uint32_t calllen;
 
     XdrMemory xdrcall(callbuf, sizeof(callbuf));
@@ -167,14 +248,14 @@ GssClient::processCall(
     if (p) {
         *p++ = RPCSEC_GSS;
         *p++ = credlen;
-        *p++ = state_.gss_ver;
-        *p++ = state_.gss_proc;
-        *p++ = state_.seq_num;
-        *p++ = state_.service;
-        auto len = state_.handle.size();
+        *p++ = 1;
+        *p++ = uint32_t(GssProc::DATA);
+        *p++ = seq;
+        *p++ = uint32_t(service);
+        auto len = handle_.size();
         *p++ = len;
         auto bp = reinterpret_cast<uint8_t*>(p);
-        copy_n(state_.handle.data(), len, bp);
+        copy_n(handle_.data(), len, bp);
         auto pad = __round(len) - len;
         while (pad--)
             *bp++ = 0;
@@ -182,67 +263,57 @@ GssClient::processCall(
     else {
         xdrcall.putWord(RPCSEC_GSS);
         xdrcall.putWord(credlen);
-        xdr(state_, &xdrcall);
+        xdr(GssCred{ 1, GssProc::DATA, seq, service, handle_}, &xdrcall);
     }
     calllen = xdrcall.writePos();
 
-    xdrs->putBytes(callbuf, calllen);
-    if (state_.gss_proc == RPCSEC_GSS_DATA) {
-        // Create a mic of the RPC header and cred
-        uint32_t maj_stat, min_stat;
-        gss_buffer_desc mic;
-        gss_buffer_desc buf{ calllen, callbuf };
-        maj_stat = gss_get_mic(
-            &min_stat, context_, GSS_C_QOP_DEFAULT, &buf, &mic);
-        if (GSS_ERROR(maj_stat)) {
-            reportError(mech_, maj_stat, min_stat);
-        }
-        xdrs->putWord(RPCSEC_GSS);
-        xdrs->putWord(mic.length);
-        xdrs->putBytes(mic.value, mic.length);
-        gss_release_buffer(&min_stat, &mic);
-    }
-    else {
-        xdrs->putWord(AUTH_NONE);
-        xdrs->putWord(0);
-    }
+    lock.unlock();
 
-    if (state_.gss_proc != RPCSEC_GSS_DATA) {
-        xargs(xdrs);
+    xdrs->putBytes(callbuf, calllen);
+    // Create a mic of the RPC header and cred
+    uint32_t maj_stat, min_stat;
+    gss_buffer_desc mic;
+    gss_buffer_desc buf{ calllen, callbuf };
+    maj_stat = gss_get_mic(
+        &min_stat, context_, GSS_C_QOP_DEFAULT, &buf, &mic);
+    if (GSS_ERROR(maj_stat)) {
+        reportError(mech_, maj_stat, min_stat);
     }
-    else {
-        encodeBody(context_, mech_, state_.service, seq, xargs, xdrs);
-    }
+    xdrs->putWord(RPCSEC_GSS);
+    xdrs->putWord(mic.length);
+    xdrs->putBytes(mic.value, mic.length);
+    gss_release_buffer(&min_stat, &mic);
+
+    encodeBody(context_, mech_, service, seq, xargs, xdrs);
 
     return seq;
 }
 
 bool
 GssClient::processReply(
-    uint32_t seq,
-    accepted_reply& areply,
-    XdrSource* xdrs, std::function<void(XdrSource*)> xresults)
+    uint32_t seq, int gen, accepted_reply& areply,
+    XdrSource* xdrs, std::function<void(XdrSource*)> xresults,
+    Protection prot)
 {
     auto& verf = areply.verf;
 
-    if (state_.gss_proc != RPCSEC_GSS_DATA) {
-        // Save the verifier so that we can verify the sequence window
-        // after establishing a context
-        if (verf.flavor == RPCSEC_GSS)
-            verf_ = verf.auth_body;
-        else
-            verf_ = {};
-        xresults(xdrs);
-        return true;
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (gen != generation_ || !established_) {
+        // Someone else has deleted the context so we need to re-validate
+        VLOG(2) << "Can't process reply: context deleted";
+        return false;
     }
-    else {
-        // Make sure we read the results before any decision on what
-        // to do with the verifier so that we don't get out of phase
-        // with the underlying channel
-        if (!decodeBody(
-                context_, mech_, state_.service, seq, xresults, xdrs))
-            return false;
-    }
+
+    inflightCalls_--;
+    cv_.notify_one();
+    lock.unlock();
+
+    // Make sure we read the results before any decision on what
+    // to do with the verifier so that we don't get out of phase
+    // with the underlying channel
+    if (!decodeBody(
+            context_, mech_, getService(prot), seq, xresults, xdrs))
+        return false;
 
     if (verf.flavor != RPCSEC_GSS)
         return false;
@@ -261,4 +332,28 @@ GssClient::processReply(
     }
 
     return true;
+}
+
+bool
+GssClient::authError(int gen, int stat)
+{
+    if (stat == RPCSEC_GSS_CREDPROBLEM || stat == RPCSEC_GSS_CTXPROBLEM) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (gen != generation_) {
+            VLOG(2) << "Auth error: context already deleted";
+        }
+        else {
+            VLOG(2) << "Auth error: deleting context";
+            uint32_t min_stat;
+            if (context_) {
+                gss_delete_sec_context(&min_stat, &context_, GSS_C_NO_BUFFER);
+                context_ = GSS_C_NO_CONTEXT;
+            }
+            established_ = false;
+            sequence_ = 1;
+            handle_ = {};
+        }
+        return true;
+    }
+    return false;
 }

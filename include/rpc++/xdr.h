@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include <rpc++/errors.h>
+
 namespace oncrpc {
 
 using std::uint8_t;
@@ -26,20 +28,6 @@ class bounded_string: public std::string
 template <typename T, size_t N>
 class bounded_vector: public std::vector<T>
 {
-};
-
-class XdrError: public std::runtime_error
-{
-public:
-    XdrError(const std::string& what)
-        : std::runtime_error(what)
-    {
-    }
-
-    XdrError(const char* what)
-        : std::runtime_error(what)
-    {
-    }
 };
 
 /// A 32-bit word stored in network byte order

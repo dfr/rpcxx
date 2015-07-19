@@ -53,7 +53,8 @@ TEST_F(ClientTest, Create)
 {
     auto chan = make_shared<LocalChannel>(svcreg);
     Test1<> client(chan);
-    Test1<GssClient> gssclient(chan, "foo@bar", "krb5", rpcsec_gss_svc_none);
+    Test1<GssClient> gssclient(
+        chan, "foo@bar", "krb5", GssService::NONE);
 }
 
 TEST_F(ClientTest, Call)

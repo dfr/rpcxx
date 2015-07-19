@@ -6,7 +6,7 @@
 #include <rpc++/util.h>
 
 namespace oncrpc {
-namespace _gssdetail {
+namespace _detail {
 
 [[noreturn]] void
 reportError(gss_OID mech, uint32_t maj, uint32_t min)
@@ -16,7 +16,7 @@ reportError(gss_OID mech, uint32_t maj, uint32_t min)
         CFStringRef str = CFErrorCopyDescription(err);
         char buf[512];
         CFStringGetCString(str, buf, 512, kCFStringEncodingUTF8);
-        std::cout << buf << std::endl;
+        VLOG(2) << buf;
     }
 
     uint32_t maj_stat, min_stat;

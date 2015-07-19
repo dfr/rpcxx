@@ -10,6 +10,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include <rpc++/client.h>
 #include <rpc++/rec.h>
 #include <rpc++/rpcproto.h>
 #include <rpc++/socket.h>
@@ -18,7 +19,6 @@
 
 namespace oncrpc {
 
-class Client;
 class XdrSink;
 class XdrSource;
 class RecordReader;
@@ -44,6 +44,7 @@ public:
         Client* client, uint32_t proc,
         std::function<void(XdrSink*)> xargs,
         std::function<void(XdrSource*)> xresults,
+        Protection prot = Protection::DEFAULT,
         std::chrono::system_clock::duration timeout = std::chrono::seconds(30));
 
     /// Read a message from the channel. If the message is a reply, try to

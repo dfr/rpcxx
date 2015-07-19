@@ -84,6 +84,16 @@ enum auth_stat: uint32_t {
 };
 
 struct call_body {
+    call_body() {}
+    call_body(call_body&& other)
+        : rpcvers(other.rpcvers),
+          prog(other.prog),
+          vers(other.vers),
+          proc(other.proc),
+          cred(std::move(other.cred)),
+          verf(std::move(other.verf))
+    {
+    }
     uint32_t rpcvers = 2;
     uint32_t prog;
     uint32_t vers;

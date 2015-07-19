@@ -69,7 +69,7 @@ public:
                     uint32_t val;
 
                     xdr(call_msg, dec);
-                    auto cbody = call_msg.cbody();
+                    auto& cbody = call_msg.cbody();
                     if (cbody.proc == 1)
                         xdr(val, dec);
                     sendMessage();
@@ -255,6 +255,7 @@ TEST_F(ChannelTest, Basic)
         channel.call(client.get(), 1,
                      [](XdrSink* xdrs) {},
                      [](XdrSource* xdrs) {},
+                     Protection::DEFAULT,
                      chrono::milliseconds(1)),
         RpcError);
 }
@@ -308,7 +309,7 @@ TEST_F(ChannelTest, LocalChannel)
 TEST_F(ChannelTest, LocalManyThreads)
 {
     auto svcreg = make_shared<ServiceRegistry>();
-    auto cl = std::make_shared<LocalChannel>(svcreg);
+    auto chan = std::make_shared<LocalChannel>(svcreg);
 
     // Add a service handler for program 1234, version 1
     auto handler = [](CallContext&& ctx)
@@ -335,7 +336,7 @@ TEST_F(ChannelTest, LocalManyThreads)
 
     deque<thread> threads;
     for (int i = 0; i < threadCount; i++)
-        threads.push_back(callMany(cl, 1, iterations));
+        threads.push_back(callMany(chan, 1, iterations));
 
     for (auto& t: threads)
         t.join();

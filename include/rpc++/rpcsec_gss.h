@@ -7,58 +7,60 @@
 namespace oncrpc {
 
 /// RPCSEC_GSS control procedures
-enum rpc_gss_proc_t: uint32_t {
-    RPCSEC_GSS_DATA = 0,
-    RPCSEC_GSS_INIT = 1,
-    RPCSEC_GSS_CONTINUE_INIT = 2,
-    RPCSEC_GSS_DESTROY = 2
+enum class GssProc: uint32_t {
+    DATA = 0,
+    INIT = 1,
+    CONTINUE_INIT = 2,
+    DESTROY = 2
 };
 
 /// RPCSEC_GSS services
-enum rpc_gss_service_t: uint32_t {
-    /* Note: the enumerated value for 0 is reserved. */
-    rpcsec_gss_svc_none = 1,
-    rpcsec_gss_svc_integrity = 2,
-    rpcsec_gss_svc_privacy = 3
+enum class GssService: uint32_t {
+    // Note: the enumerated value for 0 is reserved.
+    NONE = 1,
+    INTEGRITY = 2,
+    PRIVACY = 3
 };
 
-constexpr uint32_t MAXSEQ = 0x80000000;
+constexpr uint32_t RPCSEC_GSS_MAXSEQ = 0x80000000;
 
-struct rpc_gss_cred_vers_1_t
+/// This cred structure covers RPCSEC_GSS versions 1 and 2. We only support
+/// version 1.
+struct GssCred
 {
-    uint32_t gss_ver = 1;
-    rpc_gss_proc_t gss_proc;    // control procedure
-    uint32_t seq_num;           // sequence number
-    rpc_gss_service_t service;  // service used
-    std::vector<uint8_t> handle; // context handle
+    uint32_t version = 1;
+    GssProc proc;                   // control procedure
+    uint32_t sequence;              // sequence number
+    GssService service;             // service used
+    std::vector<uint8_t> handle;    // context handle
 };
 
 template <typename XDR>
-void xdr(RefType<rpc_gss_cred_vers_1_t, XDR> v, XDR* xdrs)
+void xdr(RefType<GssCred, XDR> v, XDR* xdrs)
 {
-    xdr(v.gss_ver, xdrs);
-    xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.gss_proc), xdrs);
-    xdr(v.seq_num, xdrs);
+    xdr(v.version, xdrs);
+    xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.proc), xdrs);
+    xdr(v.sequence, xdrs);
     xdr(reinterpret_cast<RefType<uint32_t, XDR>>(v.service), xdrs);
     xdr(v.handle, xdrs);
 }
 
-struct rpc_gss_init_res {
-    std::vector<uint8_t> handle;
-    uint32_t gss_major;
-    uint32_t gss_minor;
-    uint32_t seq_window;
-    std::vector<uint8_t> gss_token;
+struct GssInitResult {
+    std::vector<uint8_t> handle;    // server side client handle
+    uint32_t major;                 // GSS-API major status
+    uint32_t minor;                 // GSS-API minor status
+    uint32_t sequenceWindow;        // size of the sequence window
+    std::vector<uint8_t> token;     // reply token form gss_accept_sec_context
 };
 
 template <typename XDR>
-void xdr(RefType<rpc_gss_init_res, XDR>& v, XDR* xdrs)
+void xdr(RefType<GssInitResult, XDR> v, XDR* xdrs)
 {
     xdr(v.handle, xdrs);
-    xdr(v.gss_major, xdrs);
-    xdr(v.gss_minor, xdrs);
-    xdr(v.seq_window, xdrs);
-    xdr(v.gss_token, xdrs);
+    xdr(v.major, xdrs);
+    xdr(v.minor, xdrs);
+    xdr(v.sequenceWindow, xdrs);
+    xdr(v.token, xdrs);
 }
 
 }

@@ -34,8 +34,9 @@ int test_client(const vector<string>& args)
 
     try {
         auto chan = connectChannel(host, 123456, 1, "tcp");
-        for (int i = rpcsec_gss_svc_none; i <= rpcsec_gss_svc_privacy; ++i) {
-            auto service = rpc_gss_service_t(i);
+        for (auto i = int(GssService::NONE);
+             i <= int(GssService::PRIVACY); ++i) {
+            auto service = GssService(i);
             auto cl = make_shared<GssClient>(
                 123456, 1, "host@" + host, "krb5", service);
             const uint32_t ival = 42;

@@ -16,7 +16,7 @@
 
 namespace oncrpc {
 
-namespace _gssdetail {
+namespace _detail {
 
 [[noreturn]] void reportError(gss_OID mech, uint32_t maj, uint32_t min);
 
@@ -25,15 +25,15 @@ namespace _gssdetail {
 template <typename F>
 bool decodeBody(
     gss_ctx_id_t context, gss_OID mech,
-    rpc_gss_service_t service, uint32_t seq,
+    GssService service, uint32_t seq,
     F&& xbody, XdrSource* xdrs)
 {
     switch (service) {
-    case rpcsec_gss_svc_none:
+    case GssService::NONE:
         xbody(xdrs);
         break;
 
-    case rpcsec_gss_svc_integrity: {
+    case GssService::INTEGRITY: {
         std::vector<uint8_t> body;
         std::vector<uint8_t> checksum;
         xdr(body, xdrs);
@@ -65,7 +65,7 @@ bool decodeBody(
         break;
     }
 
-    case rpcsec_gss_svc_privacy: {
+    case GssService::PRIVACY: {
         std::vector<uint8_t> wrappedBody;
         xdr(wrappedBody, xdrs);
 
@@ -119,15 +119,15 @@ _encapsulateBody(const uint32_t seq, F&& xbody)
 template <typename F>
 void encodeBody(
     gss_ctx_id_t context, gss_OID mech,
-    rpc_gss_service_t service, uint32_t seq,
+    GssService service, uint32_t seq,
     F&& xbody, XdrSink* xdrs)
 {
     switch (service) {
-    case rpcsec_gss_svc_none:
+    case GssService::NONE:
         xbody(xdrs);
         break;
 
-    case rpcsec_gss_svc_integrity: {
+    case GssService::INTEGRITY: {
         // Serialise the body and sequence number
         std::vector<uint8_t> body = _encapsulateBody(seq, xbody);
 
@@ -148,7 +148,7 @@ void encodeBody(
         break;
     }
 
-    case rpcsec_gss_svc_privacy: {
+    case GssService::PRIVACY: {
         // Serialise the body and sequence number
         std::vector<uint8_t> body = _encapsulateBody(seq, xbody);
 
@@ -180,28 +180,55 @@ public:
     GssClient(uint32_t program, uint32_t version,
               const std::string& principal,
               const std::string& mechanism,
-              rpc_gss_service_t service);
+              GssService service);
 
     ~GssClient();
 
-    void validateAuth(Channel* chan) override;
-    uint32_t processCall(
-        uint32_t xid, uint32_t proc, XdrSink* xdrs,
-        std::function<void(XdrSink*)> xargs) override;
+    /// Set default service. Note: since this is separate from the API for
+    /// making RPC calls, multi-threaded applications cannot rely on this
+    /// to choose a service for subsequent calls when more than one thread
+    /// is using the client.
+    void setService(GssService service);
+
+    // Client overrides
+    int validateAuth(Channel* chan) override;
+    bool processCall(
+        uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
+        std::function<void(XdrSink*)> xargs, Protection prot) override;
     bool processReply(
-        uint32_t seq,
-        accepted_reply& areply,
-        XdrSource* xdrs, std::function<void(XdrSource*)> xresults) override;
-    //bool authError(auth_stat stat) override;
+        uint32_t seq, int gen, accepted_reply& areply,
+        XdrSource* xdrs, std::function<void(XdrSource*)> xresults,
+        Protection prot) override;
+    bool authError(int gen, int stat) override;
 
 private:
+    GssService getService(Protection prot) const
+    {
+        switch (prot) {
+        case Protection::DEFAULT:
+            return defaultService_;
+        case Protection::NONE:
+            return GssService::NONE;
+        case Protection::INTEGRITY:
+            return GssService::INTEGRITY;
+        case Protection::PRIVACY:
+            return GssService::PRIVACY;
+        }
+    }
+
+    std::mutex mutex_;            // locks context_, state_, inflightCalls_
+    std::condition_variable cv_;  // used to wait for space in sequence window
+    int generation_ = 0;          // used to track when context re-initialises
     gss_OID mech_;                // GSS-API mechanism
     gss_ctx_id_t context_;        // GSS-API context
     gss_cred_id_t cred_;          // GSS-API credential
     gss_name_t principal_;        // GSS-API name for remote principal
-    uint32_t seq_window_;         // size of the sequence window
-    rpc_gss_cred_vers_1_t state_; // wire-level protocol state
-    std::vector<uint8_t> verf_;   // used to verify seq_window_
+    uint32_t sequenceWindow_;     // size of the sequence window
+    uint32_t sequence_;           // next sequence number to use
+    bool established_;            // true if we have completed context init
+    GssService defaultService_;   // default service
+    std::vector<uint8_t> handle_; // server client handle
+    int inflightCalls_ = 0;
 };
 
 }
