@@ -25,6 +25,13 @@ static nextXid()
     return rnd();
 }
 
+template <typename Dur>
+static auto toMilliseconds(Dur dur)
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        dur).count();
+}
+
 std::chrono::seconds Channel::maxBackoff(30);
 
 Channel::Channel()
@@ -55,35 +62,40 @@ Channel::call(
     int nretries = 0;
     auto retransmitInterval = retransmitInterval_;
 
-call_again:
-    int gen = client->validateAuth(this);
-
-    std::unique_lock<std::mutex> lock(mutex_);
-
-    auto xid = xid_++;
-    VLOG(3) << "xid: " << xid << ": new call";
-    auto i = pending_.emplace(xid, std::move(Transaction()));
-    auto& tx = i.first->second;
-    tx.xid = xid;
+    uint32_t xid;
+    Transaction tx;
 
     auto now = std::chrono::system_clock::now();
     auto maxTime = now + timeout;
 
+    std::unique_lock<std::mutex> lock(mutex_);
     for (;;) {
+        lock.unlock();
+        int gen = client->validateAuth(this);
+        lock.lock();
+
+        if (!tx.xid) {
+            xid = tx.xid = xid_++;
+            VLOG(3) << "assigning new xid: " << tx.xid;
+        }
+
         // Drop the lock while we transmit
         lock.unlock();
         auto xdrout = acquireBuffer();
         if (!client->processCall(
-            xid, tx.seq, proc, xdrout.get(), xargs, prot))
-            goto call_again;
+            xid, gen, proc, xdrout.get(), xargs, prot, tx.seq)) {
+            lock.lock();
+            continue;
+        }
         sendMessage(std::move(xdrout));
         lock.lock();
+        pending_.emplace(xid, &tx);
 
         // XXX support oneway
 
-        auto retransmitTime = now + retransmitInterval;
-        if (retransmitTime > maxTime)
-            retransmitTime = maxTime;
+        tx.timeout  = now + retransmitInterval;
+        if (tx.timeout > maxTime)
+            tx.timeout = maxTime;
 
         // Loop waiting for replies until we either get a matching
         // reply message or we time out
@@ -91,37 +103,26 @@ call_again:
             now = std::chrono::system_clock::now();
             assert(lock);
             if (!tx.body) {
+                if (now >= tx.timeout) {
+                    VLOG(3) << "xid: " << xid << " timeout";
+                    break;
+                }
+                auto timeoutDuration = tx.timeout - now;
                 if (running_) {
                     // Someone else is reading replies, wait until they wake
                     // us or until we time out.
-                    auto timeoutDuration = retransmitTime - now;
                     VLOG(3) << "xid: " << xid << ": waiting for other thread: "
-                            << std::chrono::duration_cast<std::chrono::milliseconds>(timeoutDuration).count()
-                            << "ms";
+                            << toMilliseconds(timeoutDuration) << "ms";
                     tx.sleeping = true;
-                    auto status = tx.cv->wait_for(lock, timeoutDuration);
+                    tx.cv.wait_for(lock, timeoutDuration);
                     tx.sleeping = false;
-                    if (status == std::cv_status::no_timeout) {
-                        if (!tx.body) {
-                            // Some other thread woke us up so that we can
-                            // take over reading replies
-                            continue;
-                        }
-                    }
-                    else {
-                        VLOG(3) << "xid: " << xid
-                                << ": timed out waiting for other thread";
-                        break;
-                    }
                 }
                 else {
                     running_ = true;
-                    VLOG(3) << "xid: " << xid << ": waiting for reply";
-                    auto received = processIncomingMessage(
-                        tx, lock, retransmitTime - now);
+                    VLOG(3) << "xid: " << xid << ": waiting for reply: "
+                            << toMilliseconds(timeoutDuration) << "ms";
+                    processIncomingMessage(tx, lock, timeoutDuration);
                     running_ = false;
-                    if (!received)
-                        break;
                 }
             }
 
@@ -131,12 +132,14 @@ call_again:
             }
         }
 
+        assert(lock);
+        pending_.erase(xid);
+
         if (!tx.body) {
             // We timed out waiting for a reply - retransmit
             now = std::chrono::system_clock::now();
             if (now >= maxTime) {
-                assert(lock);
-                pending_.erase(xid);
+                // XXX wakeup pending threads here?
                 throw RpcError("call timeout");
             }
             VLOG(3) << "xid: " << xid << ": retransmitting";
@@ -149,44 +152,46 @@ call_again:
         assert(tx.reply.xid == xid);
         VLOG(3) << "xid: " << xid << ": reply received";
 
-        auto reply_msg = std::move(tx.reply);
-        auto xdrin = std::move(tx.body);
-        auto seq = tx.seq;
-        assert(lock);
-        pending_.erase(xid);
-
-        // If we have any pending transations, make sure that at lease
+        // If we have any pending transations, make sure that at least
         // one thread is awake to read replies.
         if (pending_.size() > 0) {
+            VLOG(4) << pending_.size() << " transactions pending";
             int liveThreads = 0;
             for (auto& i: pending_) {
-                if (!i.second.sleeping)
+                if (!i.second->sleeping) {
+                    VLOG(4) << "xid: " << i.first << " is awake";
                     liveThreads++;
+                }
+                else {
+                    VLOG(4) << "xid: " << i.first << " is sleeping";
+                }
             }
             if (liveThreads == 0) {
                 auto i = pending_.begin();
                 VLOG(3) << "waking thread for " << "xid: " << i->first;
-                i->second.cv->notify_one();
+                i->second->cv.notify_one();
             }
         }
 
         lock.unlock();
 
-        if (reply_msg.mtype == REPLY
-            && reply_msg.rbody().stat == MSG_ACCEPTED
-            && reply_msg.rbody().areply().stat == SUCCESS) {
+        if (tx.reply.mtype == REPLY
+            && tx.reply.rbody().stat == MSG_ACCEPTED
+            && tx.reply.rbody().areply().stat == SUCCESS) {
             if (!client->processReply(
-                seq, gen, reply_msg.rbody().areply(), xdrin.get(),
-                xresults, prot))
-                goto call_again;
-            releaseBuffer(std::move(xdrin));
+                tx.seq, gen, tx.reply.rbody().areply(), tx.body.get(),
+                xresults, prot)) {
+                lock.lock();
+                continue;
+            }
+            releaseBuffer(std::move(tx.body));
             break;
         }
         else {
-            releaseBuffer(std::move(xdrin));
-            switch (reply_msg.rbody().stat) {
+            releaseBuffer(std::move(tx.body));
+            switch (tx.reply.rbody().stat) {
             case MSG_ACCEPTED: {
-                const auto& areply = reply_msg.rbody().areply();
+                const auto& areply = tx.reply.rbody().areply();
                 switch (areply.stat) {
                 case SUCCESS:
                     // Handled above
@@ -216,7 +221,7 @@ call_again:
             }
 
             case MSG_DENIED: {
-                auto& rreply = reply_msg.rbody().rreply();
+                auto& rreply = tx.reply.rbody().rreply();
                 switch (rreply.stat) {
                 case RPC_MISMATCH:
                     throw ProtocolMismatch(
@@ -224,8 +229,11 @@ call_again:
                         rreply.rpc_mismatch.high);
 
                 case AUTH_ERROR:
-                    if (client->authError(gen, rreply.auth_error))
-                        goto call_again;
+                    // See if the client can refresh its creds
+                    if (client->authError(gen, rreply.auth_error)) {
+                        lock.lock();
+                        continue;
+                    }
                     throw AuthError(rreply.auth_error);
 
                 default:
@@ -247,6 +255,8 @@ bool Channel::processIncomingMessage(
     std::chrono::system_clock::duration timeout)
 {
     assert(running_);
+    VLOG(3) << "waiting for message ("
+            << (tx.xid ? "client" : "server") << ")";
     lock.unlock();
     auto body = receiveMessage(timeout);
     lock.lock();
@@ -260,8 +270,10 @@ bool Channel::processIncomingMessage(
     catch (XdrError& e) {
         goto drop;
     }
+    VLOG(3) << "xid: " << msg.xid <<": incoming message";
     if (msg.mtype == REPLY) {
         if (msg.xid == tx.xid) {
+            VLOG(3) << "xid: " << msg.xid << ": matched reply";
             tx.reply = std::move(msg);
             tx.body = std::move(body);
             return true;
@@ -271,10 +283,10 @@ bool Channel::processIncomingMessage(
         VLOG(3) << "xid: " << msg.xid << ": finding transaction";
         auto i = pending_.find(msg.xid);
         if (i != pending_.end()) {
-            auto& other = i->second;
+            auto& other = *i->second;
             other.reply = std::move(msg);
             other.body = std::move(body);
-            other.cv->notify_one();
+            other.cv.notify_one();
             return true;
         }
     }
@@ -286,8 +298,8 @@ bool Channel::processIncomingMessage(
     }
 
     // If we don't have a matching transaction, drop the message
-    // If we don't find the transaction, just drop
-    // it. This can happen for retransmits.
+    // If we don't find the transaction, just drop it. This can happen
+    // for retransmits.
     VLOG(3) << "xid: " << msg.xid << ": dropping message";
 drop:
     lock.unlock();
@@ -544,10 +556,8 @@ readAll(int sock, void* buf, size_t len)
 std::unique_ptr<XdrMemory>
 StreamChannel::receiveMessage(std::chrono::system_clock::duration timeout)
 {
-    VLOG(3) << "waiting for reply";
     if (!waitForReadable(timeout))
         return nullptr;
-    VLOG(3) << "socket is readable";
 
     bool done = false;
     std::deque<std::unique_ptr<XdrMemory>> fragments;

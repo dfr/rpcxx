@@ -11,6 +11,7 @@ namespace _detail {
 [[noreturn]] void
 reportError(gss_OID mech, uint32_t maj, uint32_t min)
 {
+    VLOG(2) << "reporting GSS-API error, major=" << maj << ", min=" << min;
     {
         CFErrorRef err = GSSCreateError(mech, maj, min);
         CFStringRef str = CFErrorCopyDescription(err);

@@ -23,8 +23,9 @@ Client::validateAuth(Channel* chan)
 
 bool
 Client::processCall(
-    uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
-    std::function<void(XdrSink*)> xargs, Protection prot)
+    uint32_t xid, int gen, uint32_t proc, XdrSink* xdrs,
+    std::function<void(XdrSink*)> xargs, Protection prot,
+    uint32_t& seq)
 {
     if (prot != Protection::DEFAULT && prot != Protection::NONE) {
         throw RpcError("unsupported protection");
@@ -130,8 +131,9 @@ SysClient::SysClient(uint32_t program, uint32_t version)
 
 bool
 SysClient::processCall(
-    uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
-    std::function<void(XdrSink*)> xargs, Protection prot)
+    uint32_t xid, int gen, uint32_t proc, XdrSink* xdrs,
+    std::function<void(XdrSink*)> xargs, Protection prot,
+    uint32_t& seq)
 {
     if (prot != Protection::DEFAULT && prot != Protection::NONE) {
         throw RpcError("unsupported protection");

@@ -26,8 +26,8 @@ public:
     }
 
     bool processCall(
-        uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
-        std::function<void(XdrSink*)> xargs, Protection prot) override
+        uint32_t xid, int gen, uint32_t proc, XdrSink* xdrs,
+        std::function<void(XdrSink*)> xargs, Protection prot, uint32_t& seq) override
     {
         uint32_t credlen = 5 * sizeof(XdrWord) + __round(cred_.handle.size());
         XdrMemory xdrcred(credlen);
@@ -216,13 +216,14 @@ GssClient::validateAuth(Channel* channel)
 
 bool
 GssClient::processCall(
-    uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
-    std::function<void(XdrSink*)> xargs, Protection prot)
+    uint32_t xid, int gen, uint32_t proc, XdrSink* xdrs,
+    std::function<void(XdrSink*)> xargs, Protection prot,
+    uint32_t& seq)
 {
     seq = 0;
 
     std::unique_lock<std::mutex> lock(mutex_);
-    if (!established_) {
+    if (!established_ || gen != generation_) {
         // Someone else has deleted the context so we need to re-validate
         VLOG(2) << "Can't process call: context deleted";
         return false;
@@ -234,7 +235,8 @@ GssClient::processCall(
     inflightCalls_++;
     seq = ++sequence_;
     auto service = getService(prot);
-    VLOG(3) << "sending message with service " << int(service);
+    VLOG(3) << "sending message service: " << int(service)
+            << ", gen: " << gen << ", sequence: " << seq;
 
     // More than enough space for the call and cred
     uint8_t callbuf[512];
@@ -318,6 +320,7 @@ GssClient::processReply(
     if (verf.flavor != RPCSEC_GSS)
         return false;
 
+    VLOG(3) << "verifying reply for gen: " << gen << ", sequence: " << seq;
     XdrWord seqbuf(seq);
     gss_buffer_desc buf { sizeof(seqbuf), &seqbuf };
     gss_buffer_desc mic { verf.auth_body.size(), verf.auth_body.data() };

@@ -193,8 +193,9 @@ public:
     // Client overrides
     int validateAuth(Channel* chan) override;
     bool processCall(
-        uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
-        std::function<void(XdrSink*)> xargs, Protection prot) override;
+        uint32_t xid, int gen, uint32_t proc, XdrSink* xdrs,
+        std::function<void(XdrSink*)> xargs, Protection prot,
+        uint32_t& seq) override;
     bool processReply(
         uint32_t seq, int gen, accepted_reply& areply,
         XdrSource* xdrs, std::function<void(XdrSource*)> xresults,

@@ -196,6 +196,7 @@ public:
         else {
             fn(static_cast<XdrSink*>(reply.get()));
         }
+        VLOG(3) << "xid: " << msg_.xid << ": sent reply";
         chan_->sendMessage(std::move(reply));
     }
 
@@ -208,6 +209,7 @@ public:
         rpc_msg reply_msg(msg_.xid, std::move(rreply));
         auto reply = chan_->acquireBuffer();
         xdr(reply_msg, static_cast<XdrSink*>(reply.get()));
+        VLOG(3) << "xid: " << msg_.xid << ": sent RPC_MISMATCH";
         chan_->sendMessage(std::move(reply));
     }
 
@@ -220,6 +222,7 @@ public:
         rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
         auto reply = chan_->acquireBuffer();
         xdr(reply_msg, static_cast<XdrSink*>(reply.get()));
+        VLOG(3) << "xid: " << msg_.xid << ": sent GARBAGE_ARGS";
         chan_->sendMessage(std::move(reply));
     }
 
@@ -232,6 +235,7 @@ public:
         rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
         auto reply = chan_->acquireBuffer();
         xdr(reply_msg, static_cast<XdrSink*>(reply.get()));
+        VLOG(3) << "xid: " << msg_.xid << ": sent PROC_UNAVAIL";
         chan_->sendMessage(std::move(reply));
     }
 
@@ -244,6 +248,7 @@ public:
         rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
         auto reply = chan_->acquireBuffer();
         xdr(reply_msg, static_cast<XdrSink*>(reply.get()));
+        VLOG(3) << "xid: " << msg_.xid << ": sent PROG_UNAVAIL";
         chan_->sendMessage(std::move(reply));
     }
 
@@ -259,6 +264,7 @@ public:
         rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
         auto reply = chan_->acquireBuffer();
         xdr(reply_msg, static_cast<XdrSink*>(reply.get()));
+        VLOG(3) << "xid: " << msg_.xid << ": sent PROG_MISMATCH";
         chan_->sendMessage(std::move(reply));
     }
 
@@ -270,6 +276,7 @@ public:
         rpc_msg reply_msg(msg_.xid, std::move(rreply));
         auto reply = chan_->acquireBuffer();
         xdr(reply_msg, static_cast<XdrSink*>(reply.get()));
+        VLOG(3) << "xid: " << msg_.xid << ": sent AUTH_ERROR";
         chan_->sendMessage(std::move(reply));
     }
 

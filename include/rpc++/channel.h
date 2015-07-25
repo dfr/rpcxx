@@ -40,7 +40,7 @@ public:
     virtual ~Channel();
 
     /// Make a remote procedure call
-    virtual void call(
+    void call(
         Client* client, uint32_t proc,
         std::function<void(XdrSink*)> xargs,
         std::function<void(XdrSource*)> xresults,
@@ -78,21 +78,11 @@ public:
 
 protected:
     struct Transaction {
-        Transaction()
-            : cv(new std::condition_variable)
-        {
-        }
-
-        Transaction(Transaction&& other)
-            : cv(std::move(other.cv)),
-              reply(std::move(other.reply))
-        {
-        }
-
         uint32_t xid = 0;
         uint32_t seq = 0;
         bool sleeping = false;
-        std::unique_ptr<std::condition_variable> cv; // signalled when ready
+        std::condition_variable cv; // signalled when ready
+        std::chrono::system_clock::time_point timeout;
         rpc_msg reply;
         std::unique_ptr<XdrMemory> body;
     };
@@ -104,7 +94,7 @@ protected:
     // transactions contained in pending_
     std::mutex mutex_;
     bool running_ = false;      // true if a thread is reading
-    std::unordered_map<uint32_t, Transaction> pending_; // in-flight calls
+    std::unordered_map<uint32_t, Transaction*> pending_; // in-flight calls
     std::shared_ptr<ServiceRegistry> svcreg_;
 };
 

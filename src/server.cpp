@@ -147,7 +147,8 @@ GssClientContext::verifyCall(CallContext& ctx)
     maj_stat = gss_verify_mic(
         &min_stat, context_, &msg, &mic, nullptr);
     if (GSS_ERROR(maj_stat)) {
-        VLOG(2) << "failed to verify message header";
+        VLOG(2) << "xid: " << ctx.msg().xid
+                << ": failed to verify message header";
         ctx.authError(RPCSEC_GSS_CREDPROBLEM);
         return false;
     }
@@ -182,6 +183,8 @@ GssClientContext::getVerifier(CallContext& ctx, opaque_auth& verf)
     else {
         seq = sequenceWindow_.size();
     }
+    VLOG(3) << "sending reply for xid: " << ctx.msg().xid
+            << ", sequence: " << seq;
 
     XdrWord val(seq);
     uint32_t maj_stat, min_stat;
@@ -246,6 +249,7 @@ ServiceRegistry::process(CallContext&& ctx)
     if (call_msg.mtype != CALL)
         return;
 
+    VLOG(3) << "xid: " << call_msg.xid << ": received call message";
     if (call_msg.cbody().rpcvers != 2) {
         ctx.rpcMismatch();
         return;
@@ -372,7 +376,8 @@ ServiceRegistry::validateAuth(CallContext& ctx)
         auto it = clients_.find(clientid);
         if (it == clients_.end()) {
             lock.unlock();
-            VLOG(2) << "can't find client " << clientid;
+            VLOG(2) << "xid: " << ctx.msg().xid
+                    << ": can't find client " << clientid;
             ctx.authError(RPCSEC_GSS_CREDPROBLEM);
             return false;
         }

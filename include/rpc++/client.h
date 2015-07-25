@@ -45,8 +45,9 @@ public:
     /// For RPCSEC_GSS, the value returned in seq can be used to validate
     /// the corresponding reply
     virtual bool processCall(
-        uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
-        std::function<void(XdrSink*)> xargs, Protection prot);
+        uint32_t xid, int gen, uint32_t proc, XdrSink* xdrs,
+        std::function<void(XdrSink*)> xargs, Protection prot,
+        uint32_t& seq);
 
     /// Validate a reply and decode results. Return true if the reply is valid.
     virtual bool processReply(
@@ -72,8 +73,9 @@ public:
     SysClient(uint32_t program, uint32_t version);
 
     bool processCall(
-        uint32_t xid, uint32_t& seq, uint32_t proc, XdrSink* xdrs,
-        std::function<void(XdrSink*)> xargs, Protection prot) override;
+        uint32_t xid, int gen, uint32_t proc, XdrSink* xdrs,
+        std::function<void(XdrSink*)> xargs, Protection prot,
+        uint32_t& seq) override;
 
 private:
     std::vector<uint8_t> cred_;
