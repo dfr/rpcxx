@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <deque>
 #include <functional>
+#include <future>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -14,6 +15,7 @@
 #include <rpc++/rec.h>
 #include <rpc++/rpcproto.h>
 #include <rpc++/socket.h>
+#include <rpc++/timeout.h>
 #include <rpc++/util.h>
 #include <rpc++/xdr.h>
 
@@ -31,6 +33,7 @@ protected:
     struct Transaction;
 
 public:
+    typedef std::chrono::system_clock clock_type;
     static std::chrono::seconds maxBackoff;
 
     /// Create an RPC channel
@@ -39,21 +42,29 @@ public:
 
     virtual ~Channel();
 
+    /// Set a timeout manager for this channel. This is required to support
+    /// timeouts for async calls. Note: caller is responsible for the
+    /// TimeoutManager lifetime
+    void setTimeoutManager(TimeoutManager* tman)
+    {
+        tman_ = tman;
+    }
+
+    /// Make an asynchronous remote procedure call
+    std::future<void> callAsync(
+        Client* client, uint32_t proc,
+        std::function<void(XdrSink*)> xargs,
+        std::function<void(XdrSource*)> xresults,
+        Protection prot = Protection::DEFAULT,
+        clock_type::duration timeout = std::chrono::seconds(30));
+
     /// Make a remote procedure call
     void call(
         Client* client, uint32_t proc,
         std::function<void(XdrSink*)> xargs,
         std::function<void(XdrSource*)> xresults,
         Protection prot = Protection::DEFAULT,
-        std::chrono::system_clock::duration timeout = std::chrono::seconds(30));
-
-    /// Read a message from the channel. If the message is a reply, try to
-    /// match it with a pending call transaction and hand off a suitable
-    /// XdrSource to that transaction. Return true if a message was received
-    /// otherwise false if the timeout was reached.
-    bool processIncomingMessage(
-        Transaction& tx, std::unique_lock<std::mutex>& lock,
-        std::chrono::system_clock::duration timeout);
+        clock_type::duration timeout = std::chrono::seconds(30));
 
     /// Return a buffer suitable for encoding an outgoing message. When
     /// the message is complete, call sendMessage to send it to the remote
@@ -74,21 +85,40 @@ public:
     /// If no message was received before the timeout, a null pointer is
     /// returned.
     virtual std::unique_ptr<XdrMemory> receiveMessage(
-        std::chrono::system_clock::duration timeout) = 0;
+        clock_type::duration timeout) = 0;
 
 protected:
+
+    /// Read a message from the channel. If the message is a reply, try to
+    /// match it with a pending call transaction and hand off a suitable
+    /// XdrSource to that transaction. Return true if a message was received
+    /// otherwise false if the timeout was reached.
+    bool processIncomingMessage(
+        Transaction& tx, std::unique_lock<std::mutex>& lock,
+        clock_type::duration timeout);
+
+    /// Parse a reply message, possibly decoding the reply body. Returns
+    /// true if the call is complete, otherwise false if the message should
+    /// be re-sent.
+    bool processReply(
+        Client* client, uint32_t proc, Transaction& tx, Protection prot,
+        int gen, std::function<void(XdrSource*)> xresults);
+
     struct Transaction {
         uint32_t xid = 0;
         uint32_t seq = 0;
         bool sleeping = false;
         std::condition_variable cv; // signalled when ready
-        std::chrono::system_clock::time_point timeout;
+        clock_type::time_point timeout;
         rpc_msg reply;
         std::unique_ptr<XdrMemory> body;
+        TimeoutManager::task_type tid = 0;
+        bool async = false;
+        std::packaged_task<void()> continuation;
     };
 
     uint32_t xid_;
-    std::chrono::system_clock::duration retransmitInterval_;
+    clock_type::duration retransmitInterval_;
 
     // The mutex serialises access to running_, pending_ and all
     // transactions contained in pending_
@@ -96,6 +126,7 @@ protected:
     bool running_ = false;      // true if a thread is reading
     std::unordered_map<uint32_t, Transaction*> pending_; // in-flight calls
     std::shared_ptr<ServiceRegistry> svcreg_;
+    TimeoutManager* tman_ = nullptr;  // XXX: observer_ptr
 };
 
 /// Process RPC calls using the given registry of local
@@ -110,7 +141,10 @@ public:
     void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
     void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
     std::unique_ptr<XdrMemory> receiveMessage(
-        std::chrono::system_clock::duration timeout) override;
+        clock_type::duration timeout) override;
+
+    /// Process a single queued reply - intended for testing
+    void processReply();
 
 private:
     friend struct ReplyChannel;
@@ -126,7 +160,7 @@ private:
         void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
         void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
         std::unique_ptr<XdrMemory> receiveMessage(
-            std::chrono::system_clock::duration timeout) override;
+            clock_type::duration timeout) override;
 
         LocalChannel* chan_;
     };
@@ -159,7 +193,7 @@ public:
     void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
     void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
     std::unique_ptr<XdrMemory> receiveMessage(
-        std::chrono::system_clock::duration timeout) override;
+        clock_type::duration timeout) override;
 
 private:
     size_t bufferSize_;
@@ -180,7 +214,7 @@ public:
     void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
     void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
     std::unique_ptr<XdrMemory> receiveMessage(
-        std::chrono::system_clock::duration timeout) override;
+        clock_type::duration timeout) override;
 
 private:
     ptrdiff_t write(const void* buf, size_t len);

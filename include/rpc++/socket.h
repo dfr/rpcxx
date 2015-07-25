@@ -11,6 +11,8 @@
 #include <netdb.h>
 #include <sys/socket.h>
 
+#include <rpc++/timeout.h>
+
 namespace oncrpc {
 
 /// Given a Network ID (see RFC 5665), return a pair with the first element
@@ -38,9 +40,12 @@ std::vector<AddressInfo> getAddressInfo(
 
 class Socket;
 
-class SocketManager
+class SocketManager: public TimeoutManager
 {
 public:
+    SocketManager();
+    ~SocketManager();
+
     void add(std::shared_ptr<Socket> conn);
 
     void remove(std::shared_ptr<Socket> conn);
@@ -49,10 +54,16 @@ public:
 
     void stop();
 
+    // TimeoutManager overrides
+    task_type add(
+        clock_type::time_point when, std::function<void()> what) override;
+
 private:
     std::mutex mutex_;
+    bool running_ = false;
     bool stopping_ = false;
     std::unordered_map<int, std::shared_ptr<Socket>> sockets_;
+    int pipefds_[2];
 };
 
 struct Socket

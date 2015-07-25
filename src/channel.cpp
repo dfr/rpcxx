@@ -51,13 +51,82 @@ Channel::~Channel()
     assert(pending_.size() == 0);
 }
 
+std::future<void>
+Channel::callAsync(
+    Client* client, uint32_t proc,
+    std::function<void(XdrSink*)> xargs,
+    std::function<void(XdrSource*)> xresults,
+    Protection prot,
+    clock_type::duration timeout)
+{
+    uint32_t xid;
+    auto txp = new Transaction;
+    auto& tx = *txp;
+
+    auto now = clock_type::now();
+    auto maxTime = now + timeout;
+    int gen;
+    std::unique_ptr<XdrMemory> xdrout;
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    xid = tx.xid = xid_++;
+    VLOG(3) << "assigning new xid: " << tx.xid;
+    lock.unlock();
+
+    for (;;) {
+        gen = client->validateAuth(this, false);
+        if (!gen) {
+            using namespace std::placeholders;
+            delete txp;
+            return std::async(
+                std::bind(&Channel::call, this, _1, _2, _3, _4, _5, _6),
+                client, proc, xargs, xresults, prot, timeout);
+        }
+
+        xdrout = acquireBuffer();
+        if (!client->processCall(
+            xid, gen, proc, xdrout.get(), xargs, prot, tx.seq)) {
+            continue;
+        }
+        break;
+    }
+
+    if (tman_) {
+        // XXX: Should attempt to support retransmits here
+        tx.tid = tman_->add(maxTime, [=]() {
+            pending_.erase(xid);
+            txp->continuation();
+            delete txp;
+        });
+    }
+    tx.async = true;
+    tx.continuation = std::packaged_task<void()>([=]() {
+        auto now = clock_type::now();
+        auto& tx = *txp;
+        if (!tx.body)
+            throw TimeoutError();
+        if (!processReply(client, proc, tx, prot, gen, xresults)) {
+            // This should be rare - just process the call synchronously
+            call(client, proc, xargs, xresults, prot, maxTime - now);
+        }
+    });
+    tx.timeout = maxTime;
+
+    lock.lock();
+    pending_.emplace(xid, txp);
+    lock.unlock();
+
+    sendMessage(std::move(xdrout));
+    return tx.continuation.get_future();
+}
+
 void
 Channel::call(
     Client* client, uint32_t proc,
     std::function<void(XdrSink*)> xargs,
     std::function<void(XdrSource*)> xresults,
     Protection prot,
-    std::chrono::system_clock::duration timeout)
+    clock_type::duration timeout)
 {
     int nretries = 0;
     auto retransmitInterval = retransmitInterval_;
@@ -65,7 +134,7 @@ Channel::call(
     uint32_t xid;
     Transaction tx;
 
-    auto now = std::chrono::system_clock::now();
+    auto now = clock_type::now();
     auto maxTime = now + timeout;
 
     std::unique_lock<std::mutex> lock(mutex_);
@@ -100,7 +169,7 @@ Channel::call(
         // Loop waiting for replies until we either get a matching
         // reply message or we time out
         for (;;) {
-            now = std::chrono::system_clock::now();
+            now = clock_type::now();
             assert(lock);
             if (!tx.body) {
                 if (now >= tx.timeout) {
@@ -137,10 +206,10 @@ Channel::call(
 
         if (!tx.body) {
             // We timed out waiting for a reply - retransmit
-            now = std::chrono::system_clock::now();
+            now = clock_type::now();
             if (now >= maxTime) {
                 // XXX wakeup pending threads here?
-                throw RpcError("call timeout");
+                throw TimeoutError();
             }
             VLOG(3) << "xid: " << xid << ": retransmitting";
             nretries++;
@@ -152,7 +221,7 @@ Channel::call(
         assert(tx.reply.xid == xid);
         VLOG(3) << "xid: " << xid << ": reply received";
 
-        // If we have any pending transations, make sure that at least
+        // If we have any pending transactions, make sure that at least
         // one thread is awake to read replies.
         if (pending_.size() > 0) {
             VLOG(4) << pending_.size() << " transactions pending";
@@ -174,94 +243,42 @@ Channel::call(
         }
 
         lock.unlock();
-
-        if (tx.reply.mtype == REPLY
-            && tx.reply.rbody().stat == MSG_ACCEPTED
-            && tx.reply.rbody().areply().stat == SUCCESS) {
-            if (!client->processReply(
-                tx.seq, gen, tx.reply.rbody().areply(), tx.body.get(),
-                xresults, prot)) {
-                lock.lock();
-                continue;
-            }
-            releaseBuffer(std::move(tx.body));
-            break;
-        }
-        else {
-            releaseBuffer(std::move(tx.body));
-            switch (tx.reply.rbody().stat) {
-            case MSG_ACCEPTED: {
-                const auto& areply = tx.reply.rbody().areply();
-                switch (areply.stat) {
-                case SUCCESS:
-                    // Handled above
-                    assert(false);
-
-                case PROG_UNAVAIL:
-                    throw ProgramUnavailable(client->program());
-
-                case PROG_MISMATCH:
-                    throw VersionMismatch(
-                        areply.mismatch_info.low,
-                        areply.mismatch_info.high);
-
-                case PROC_UNAVAIL:
-                    throw ProcedureUnavailable(proc);
-
-                case GARBAGE_ARGS:
-                    throw GarbageArgs();
-
-                case SYSTEM_ERR:
-                    throw SystemError();
-
-                default:
-                    throw RpcError("unknown accept status");
-                }
-                break;
-            }
-
-            case MSG_DENIED: {
-                auto& rreply = tx.reply.rbody().rreply();
-                switch (rreply.stat) {
-                case RPC_MISMATCH:
-                    throw ProtocolMismatch(
-                        rreply.rpc_mismatch.low,
-                        rreply.rpc_mismatch.high);
-
-                case AUTH_ERROR:
-                    // See if the client can refresh its creds
-                    if (client->authError(gen, rreply.auth_error)) {
-                        lock.lock();
-                        continue;
-                    }
-                    throw AuthError(rreply.auth_error);
-
-                default:
-                    throw RpcError("unknown reject status");
-                }
-                break;
-            }
-
-            default:
-                throw RpcError("unknown reply status");
-            }
-        }
+        if (processReply(client, proc, tx, prot, gen, xresults))
+            return;
+        lock.lock();
     }
 }
 
 bool Channel::processIncomingMessage(
     Transaction& tx,
     std::unique_lock<std::mutex>& lock,
-    std::chrono::system_clock::duration timeout)
+    clock_type::duration timeout)
 {
-    assert(running_);
-    VLOG(3) << "waiting for message ("
-            << (tx.xid ? "client" : "server") << ")";
-    lock.unlock();
-    auto body = receiveMessage(timeout);
-    lock.lock();
-    if (!body)
-        return false;
+    auto now = clock_type::now();
+    auto timeoutPoint = now + timeout;
+    std::unique_ptr<XdrMemory> body;
+    while (!body) {
+        clock_type::time_point stopPoint;
+        if (tman_) {
+            stopPoint = std::min(timeoutPoint, tman_->next());
+        }
+        else {
+            stopPoint = timeoutPoint;
+        }
+        assert(running_);
+        VLOG(3) << "waiting for message ("
+                << (tx.xid ? "client" : "server") << ")";
+        lock.unlock();
+        if (tman_) tman_->update(now);
+        body = receiveMessage(stopPoint - now);
+        lock.lock();
+        if (body)
+            break;
+        now = clock_type::now();
+        if (tman_) tman_->update(now);
+        if (now >= timeoutPoint)
+            return false;
+    }
 
     rpc_msg msg;
     try {
@@ -286,7 +303,17 @@ bool Channel::processIncomingMessage(
             auto& other = *i->second;
             other.reply = std::move(msg);
             other.body = std::move(body);
-            other.cv.notify_one();
+            if (other.async) {
+                // Note: the transaction was allocated in callAsync so we
+                // need to free it here
+                if (tman_) tman_->cancel(other.tid);
+                pending_.erase(msg.xid);
+                other.continuation();
+                delete &other;
+            }
+            else {
+                other.cv.notify_one();
+            }
             return true;
         }
     }
@@ -306,6 +333,82 @@ drop:
     releaseBuffer(std::move(body));
     lock.lock();
     return true;
+}
+
+bool
+Channel::processReply(
+    Client* client, uint32_t proc, Transaction& tx, Protection prot,
+    int gen, std::function<void(XdrSource*)> xresults)
+{
+    if (tx.reply.mtype == REPLY
+        && tx.reply.rbody().stat == MSG_ACCEPTED
+        && tx.reply.rbody().areply().stat == SUCCESS) {
+        if (!client->processReply(
+            tx.seq, gen, tx.reply.rbody().areply(), tx.body.get(),
+            xresults, prot)) {
+            return false;
+        }
+        releaseBuffer(std::move(tx.body));
+        return true;
+    }
+    else {
+        releaseBuffer(std::move(tx.body));
+        switch (tx.reply.rbody().stat) {
+        case MSG_ACCEPTED: {
+            const auto& areply = tx.reply.rbody().areply();
+            switch (areply.stat) {
+            case SUCCESS:
+                // Handled above
+                assert(false);
+
+            case PROG_UNAVAIL:
+                throw ProgramUnavailable(client->program());
+
+            case PROG_MISMATCH:
+                throw VersionMismatch(
+                    areply.mismatch_info.low,
+                    areply.mismatch_info.high);
+
+            case PROC_UNAVAIL:
+                throw ProcedureUnavailable(proc);
+
+            case GARBAGE_ARGS:
+                throw GarbageArgs();
+
+            case SYSTEM_ERR:
+                throw SystemError();
+
+            default:
+                throw RpcError("unknown accept status");
+            }
+            break;
+        }
+
+        case MSG_DENIED: {
+            auto& rreply = tx.reply.rbody().rreply();
+            switch (rreply.stat) {
+            case RPC_MISMATCH:
+                throw ProtocolMismatch(
+                    rreply.rpc_mismatch.low,
+                    rreply.rpc_mismatch.high);
+
+            case AUTH_ERROR:
+                // See if the client can refresh its creds
+                if (client->authError(gen, rreply.auth_error)) {
+                    return false;
+                }
+                throw AuthError(rreply.auth_error);
+
+            default:
+                throw RpcError("unknown reject status");
+            }
+            break;
+        }
+
+        default:
+            throw RpcError("unknown reply status");
+        }
+    }
 }
 
 LocalChannel::LocalChannel(std::shared_ptr<ServiceRegistry> svcreg)
@@ -362,13 +465,13 @@ LocalChannel::ReplyChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
 
 std::unique_ptr<XdrMemory>
 LocalChannel::ReplyChannel::receiveMessage(
-    std::chrono::system_clock::duration timeout)
+    clock_type::duration timeout)
 {
     return nullptr;
 }
 
 std::unique_ptr<XdrMemory>
-LocalChannel::receiveMessage(std::chrono::system_clock::duration timeout)
+LocalChannel::receiveMessage(clock_type::duration timeout)
 {
     std::unique_lock<std::mutex> lock(mutex_);
     if (queue_.size() == 0)
@@ -376,6 +479,18 @@ LocalChannel::receiveMessage(std::chrono::system_clock::duration timeout)
     auto msg = std::move(queue_.front());
     queue_.pop_front();
     return std::move(msg);
+}
+
+void
+LocalChannel::processReply()
+{
+    using namespace std::literals::chrono_literals;
+    Transaction nulltx;
+    std::unique_lock<std::mutex> lock(mutex_);
+    assert(!running_);
+    running_ = true;
+    processIncomingMessage(nulltx, lock, 0s);
+    running_ = false;
 }
 
 SocketChannel::SocketChannel(int sock)
@@ -457,7 +572,7 @@ DatagramChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
 }
 
 std::unique_ptr<XdrMemory>
-DatagramChannel::receiveMessage(std::chrono::system_clock::duration timeout)
+DatagramChannel::receiveMessage(clock_type::duration timeout)
 {
     if (!waitForReadable(timeout))
         return nullptr;
@@ -554,7 +669,7 @@ readAll(int sock, void* buf, size_t len)
 }
 
 std::unique_ptr<XdrMemory>
-StreamChannel::receiveMessage(std::chrono::system_clock::duration timeout)
+StreamChannel::receiveMessage(clock_type::duration timeout)
 {
     if (!waitForReadable(timeout))
         return nullptr;

@@ -32,6 +32,19 @@ public:
                 uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
     }
 
+    future<void> simpleCallAsync(
+        shared_ptr<Channel> chan, shared_ptr<Client> client, uint32_t proc,
+        Channel::clock_type::duration timeout = 30s)
+    {
+        return chan->callAsync(
+            client.get(), proc,
+            [](XdrSink* xdrs) {
+                uint32_t v = 123; xdr(v, xdrs); },
+            [](XdrSource* xdrs) {
+                uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); },
+            Protection::DEFAULT, timeout);
+    }
+
     thread callMany(
         shared_ptr<Channel> chan, uint32_t proc, int iterations)
     {
@@ -257,7 +270,7 @@ TEST_F(ChannelTest, Basic)
                      [](XdrSource* xdrs) {},
                      Protection::DEFAULT,
                      chrono::milliseconds(1)),
-        RpcError);
+        TimeoutError);
 }
 
 TEST_F(ChannelTest, LocalChannel)
@@ -504,6 +517,96 @@ TEST_F(ChannelTest, BadReply)
             [](XdrSource* xdrs) {
                 uint64_t v; xdr(v, xdrs); }),
         XdrError);
+}
+
+TEST_F(ChannelTest, LocalCallAsync)
+{
+    auto svcreg = make_shared<ServiceRegistry>();
+    auto chan = std::make_shared<LocalChannel>(svcreg);
+
+    // Add a service handler for program 1234, version 1
+    auto handler = [](CallContext&& ctx)
+        {
+            switch (ctx.proc()) {
+            case 0:
+                ctx.sendReply([](XdrSink*){});
+                break;
+
+            case 1:
+                uint32_t val;
+                ctx.getArgs([&](XdrSource* xdrs){ xdr(val, xdrs); });
+                ctx.sendReply([&](XdrSink* xdrs){ xdr(val, xdrs); });
+                break;
+
+            default:
+                ctx.procedureUnavailable();
+            }
+        };
+    svcreg->add(1234, 1, handler);
+
+    auto f = simpleCallAsync(chan, client, 1);
+    chan->processReply();
+    f.get();
+}
+
+TEST_F(ChannelTest, StreamCallAsync)
+{
+    int sockpair[2];
+    ASSERT_GE(::socketpair(AF_LOCAL, SOCK_STREAM, 0, sockpair), 0);
+
+    int ssock = sockpair[0];
+    int clsock = sockpair[1];
+
+    SimpleStreamServer server(ssock);
+    auto chan = make_shared<StreamChannel>(clsock);
+
+    // Read replies asynchronously using a SockerManager.
+    SocketManager sockman;
+    sockman.add(chan);
+    thread t([&]() { sockman.run(); });
+
+    auto f = simpleCallAsync(chan, client, 1);
+    f.get();
+
+    server.stop(chan, client);
+    sockman.stop();
+    t.join();
+}
+
+TEST_F(ChannelTest, LocalAsyncTimeout)
+{
+    auto svcreg = make_shared<ServiceRegistry>();
+    TimeoutManager tman;
+    auto chan = std::make_shared<LocalChannel>(svcreg);
+    chan->setTimeoutManager(&tman);
+    auto f = simpleCallAsync(chan, client, 1, 5ms);
+    std::this_thread::sleep_for(10ms);
+    chan->processReply();
+    EXPECT_THROW(f.get(), TimeoutError);
+}
+
+TEST_F(ChannelTest, StreamAsyncTimeout)
+{
+    int sockpair[2];
+    ASSERT_GE(::socketpair(AF_LOCAL, SOCK_STREAM, 0, sockpair), 0);
+
+    int ssock = sockpair[0];
+    int clsock = sockpair[1];
+
+    auto chan = make_shared<StreamChannel>(clsock);
+
+    // Read replies asynchronously using a SockerManager.
+    SocketManager sockman;
+    sockman.add(chan);
+    chan->setTimeoutManager(&sockman);
+    thread t([&]() { sockman.run(); });
+
+    auto f = simpleCallAsync(chan, client, 1, 5ms);
+    std::this_thread::sleep_for(10ms);
+    EXPECT_THROW(f.get(), TimeoutError);
+
+    sockman.stop();
+    t.join();
 }
 
 }

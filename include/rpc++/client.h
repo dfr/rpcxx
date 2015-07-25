@@ -36,10 +36,13 @@ public:
     /// Return the RPC program version number
     uint32_t version() const { return version_; }
 
-    /// Validate the client, re-initialising auth state as necessary and
-    /// return a generation number which can be used to detect when the auth
-    /// state has changed
-    virtual int validateAuth(Channel* chan);
+    /// Validate the client, returning a non-zero generation number if valid
+    /// This generation number can be used to detect when the auth state
+    /// has changed.
+    ///
+    /// If the auth state is not valid, re-validate it if revalidate is true,
+    /// returning the new generation, otherwise return zero.
+    virtual int validateAuth(Channel* chan, bool revalidate = true);
 
     /// Encode a call message including cred, verf and message body.
     /// For RPCSEC_GSS, the value returned in seq can be used to validate

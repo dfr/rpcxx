@@ -1,7 +1,7 @@
 #include <cstdlib>
 #include <sstream>
-
 #include <unistd.h>
+#include <glog/logging.h>
 
 #include <rpc++/errors.h>
 #include <rpc++/socket.h>
@@ -61,66 +61,112 @@ std::vector<AddressInfo> oncrpc::getAddressInfo(
     return addrs;
 }
 
+SocketManager::SocketManager()
+{
+    ::pipe(pipefds_);
+}
+
+SocketManager::~SocketManager()
+{
+    ::close(pipefds_[0]);
+    ::close(pipefds_[1]);
+}
+
 void
 SocketManager::add(std::shared_ptr<Socket> sock)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     sockets_[sock->fd()] = sock;
 }
 
 void
 SocketManager::remove(std::shared_ptr<Socket> sock)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     sockets_.erase(sock->fd());
 }
 
 void
 SocketManager::run()
 {
-    mutex_.lock();
+    std::unique_lock<std::mutex> lock(mutex_);
+    running_ = true;
     while (sockets_.size() > 0 && !stopping_) {
         fd_set rset;
-        int maxfd = 0;
+        int maxfd = pipefds_[0];
         FD_ZERO(&rset);
+        FD_SET(pipefds_[0], &rset);
         for (const auto& i: sockets_) {
             int fd = i.first;
             maxfd = std::max(maxfd, fd);
             FD_SET(fd, &rset);
         }
-        mutex_.unlock();
-        auto nready = ::select(maxfd + 1, &rset, nullptr, nullptr, nullptr);
+        lock.unlock();
+        auto stopTime = next();
+        auto now = clock_type::now();
+        int timeout = std::chrono::duration_cast<std::chrono::microseconds>(
+            stopTime - now).count();
+        if (timeout < 0)
+            timeout = 0;
+        VLOG(3) << "sleeping for " << timeout << "us";
+        ::timeval tv { timeout / 1000000, timeout % 1000000 };
+        auto nready = ::select(maxfd + 1, &rset, nullptr, nullptr, &tv);
         if (nready < 0) {
             throw std::system_error(errno, std::system_category());
         }
 
-        if (nready == 0)
-            continue;
+        // Execute timeouts, if any
+        update(clock_type::now());
 
-        mutex_.lock();
+        lock.lock();
+        if (nready == 0) {
+            continue;
+        }
+
+        if (FD_ISSET(pipefds_[0], &rset)) {
+            char ch;
+            ::read(pipefds_[0], &ch, 1);
+            continue;
+        }
+
         std::vector<std::shared_ptr<Socket>> ready;
         for (const auto& i: sockets_) {
             if (FD_ISSET(i.first, &rset)) {
                 ready.push_back(i.second);
             }
         }
-        mutex_.unlock();
+        lock.unlock();
 
         for (auto sock: ready) {
             if (!sock->onReadable(this))
                 remove(sock);
         }
 
-        mutex_.lock();
+        lock.lock();
     }
-    mutex_.unlock();
+    running_ = false;
 }
 
 void
 SocketManager::stop()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock<std::mutex> lock(mutex_);
     stopping_ = true;
+    char ch = 0;
+    ::write(pipefds_[1], &ch, 1);
+}
+
+TimeoutManager::task_type
+SocketManager::add(
+    clock_type::time_point when, std::function<void()> what)
+{
+    auto tid = TimeoutManager::add(when, what);
+    std::unique_lock<std::mutex> lock(mutex_);
+    if (running_) {
+        char ch = 0;
+        ::write(pipefds_[1], &ch, 1);
+    }
+    return tid;
 }
 
 Socket::~Socket()

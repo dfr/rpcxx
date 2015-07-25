@@ -112,14 +112,23 @@ GssClient::setService(GssService service)
 }
 
 int
-GssClient::validateAuth(Channel* channel)
+GssClient::validateAuth(Channel* channel, bool revalidate)
 {
     uint32_t maj_stat, min_stat;
+
+    if (established_) {
+        // re-check after taking the lock
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (established_)
+            return generation_;
+    }
+
+    if (!revalidate)
+        return 0;
 
     std::unique_lock<std::mutex> lock(mutex_);
 
     if (established_) {
-        VLOG(3) << "Context is valid";
         return generation_;
     }
 

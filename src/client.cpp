@@ -16,9 +16,9 @@ Client::~Client()
 }
 
 int
-Client::validateAuth(Channel* chan)
+Client::validateAuth(Channel* chan, bool revalidate)
 {
-    return 0;
+    return 1;
 }
 
 bool

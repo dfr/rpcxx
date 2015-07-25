@@ -191,7 +191,7 @@ public:
     void setService(GssService service);
 
     // Client overrides
-    int validateAuth(Channel* chan) override;
+    int validateAuth(Channel* chan, bool revalidate) override;
     bool processCall(
         uint32_t xid, int gen, uint32_t proc, XdrSink* xdrs,
         std::function<void(XdrSink*)> xargs, Protection prot,

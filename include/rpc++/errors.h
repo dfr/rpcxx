@@ -36,6 +36,15 @@ public:
     }
 };
 
+class TimeoutError: public RpcError
+{
+public:
+    TimeoutError()
+        : RpcError("timeout")
+    {
+    }
+};
+
 /// MSG_ACCEPTED, PROG_UNAVAIL
 class ProgramUnavailable: public RpcError
 {
