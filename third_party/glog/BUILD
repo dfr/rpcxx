@@ -38,32 +38,6 @@ cc_library(
 )
 
 cc_test(
-  name = "demangle_unittest",
-  deps = [
-    ":glog",
-  ],
-  srcs = [
-    "upstream/src/demangle_unittest.cc",
-  ],
-  copts = [
-    "-Ithird_party/glog/gen/src"
-  ],
-)
-
-cc_test(
-  name = "logging_unittest",
-  deps = [
-    ":glog",
-  ],
-  srcs = [
-    "upstream/src/logging_unittest.cc",
-  ],
-  copts = [
-    "-Ithird_party/glog/gen/src"
-  ],
-)
-
-cc_test(
   name = "symbolize_unittest",
   deps = [
     ":glog",
