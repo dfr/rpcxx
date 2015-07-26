@@ -214,4 +214,115 @@ TEST_F(ServerTest, Listen)
     EXPECT_GE(::unlink(sun.sun_path), 0);
 }
 
+TEST_F(ServerTest, MultiThread)
+{
+    int sockpair[2];
+    ASSERT_GE(::socketpair(AF_LOCAL, SOCK_STREAM, 0, sockpair), 0);
+
+    auto cchan = make_shared<StreamChannel>(sockpair[0]);
+    auto schan = make_shared<StreamChannel>(sockpair[1], svcreg);
+
+    auto sockman = make_shared<SocketManager>();
+    sockman->add(cchan);
+    sockman->add(schan);
+    thread t([sockman]() { sockman->run(); });
+
+    struct ThreadPool
+    {
+        ThreadPool(Service svc, int workerCount)
+        {
+            for (int i = 0; i < workerCount; i++)
+                workers_.emplace_back(svc);
+        }
+
+        void dispatch(CallContext&& ctx)
+        {
+            VLOG(2) << "xid: " << ctx.msg().xid
+                    << ": dispatching to worker " << nextWorker_;
+            workers_[nextWorker_].add(move(ctx));
+            nextWorker_++;
+            if (nextWorker_ == workers_.size())
+                nextWorker_ = 0;
+        }
+
+        struct Worker
+        {
+            Worker(Service svc)
+                : svc_(svc)
+            {
+                thread_ = thread([this]() {
+                    unique_lock<mutex> lock(mutex_);
+                    while (!stopping_) {
+                        VLOG(2) << "queue size " << work_.size();
+                        if (work_.size() > 0) {
+                            auto ctx = move(work_.front());
+                            work_.pop_front();
+                            ctx.setService(svc_);
+                            lock.unlock();
+                            //std::this_thread::sleep_for(10ms);
+                            VLOG(2) << "xid: " << ctx.msg().xid << ": running";
+                            ctx.run();
+                            lock.lock();
+                        }
+                        if (work_.size() == 0)
+                            cv_.wait(lock);
+                    }
+                });
+            }
+
+            ~Worker()
+            {
+                stopping_ = true;
+                cv_.notify_one();
+                thread_.join();
+            }
+
+            void add(CallContext&& ctx)
+            {
+                unique_lock<mutex> lock(mutex_);
+                work_.emplace_back(move(ctx));
+                cv_.notify_one();
+            }
+
+            thread thread_;
+            mutex mutex_;
+            condition_variable cv_;
+            deque<CallContext> work_;
+            bool stopping_ = false;
+            Service svc_;
+        };
+
+        deque<Worker> workers_;
+        int nextWorker_ = 0;
+    };
+
+    // Wrap the test service with a simple thread pool dispatcher
+    auto svc = svcreg->lookup(1234, 1);
+    svcreg->remove(1234, 1);
+    ThreadPool pool(svc, 10);
+    svcreg->add(1234, 1, bind(&ThreadPool::dispatch, &pool, _1));
+
+    int callCount = 1000;
+    int maxPending = 100;
+    deque<future<void>> calls;
+    for (int i = 0; i < callCount; i++) {
+        auto f = cchan->callAsync(
+            client.get(), 1,
+            [](XdrSink* xdrs) {
+                uint32_t v = 123; xdr(v, xdrs); },
+            [](XdrSource* xdrs) {
+                uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
+        calls.emplace_back(move(f));
+        while (calls.size() > maxPending) {
+            calls.front().get();
+            calls.pop_front();
+        }
+    }
+    for (auto& f: calls)
+        f.get();
+
+    sockman->stop();
+    t.join();
+}
+
 }

@@ -131,6 +131,16 @@ public:
     {
     }
 
+    CallContext(CallContext&& other)
+        : msg_(std::move(other.msg_)),
+          gsscred_(std::move(other.gsscred_)),
+          args_(std::move(other.args_)),
+          chan_(std::move(other.chan_)),
+          svc_(std::move(other.svc_)),
+          client_(std::move(other.client_))
+     {
+     }
+
     ~CallContext()
     {
         if (args_)
