@@ -265,7 +265,7 @@ ServiceRegistry::process(CallContext&& ctx)
         // pool. Alternatively, the application can supply a service handler
         // which could defer execution to some other executor.
         ctx.setService(lookup(ctx.prog(), ctx.vers()));
-        ctx.run();
+        ctx();
     }
     catch (ProgramUnavailable& e) {
         // Figure out which error message to use

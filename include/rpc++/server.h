@@ -125,27 +125,31 @@ public:
     CallContext(
         rpc_msg&& msg, std::unique_ptr<XdrMemory> args,
         std::shared_ptr<Channel> chan)
-        : msg_(std::move(msg)),
+        : size_(args->readSize()),
+          msg_(std::move(msg)),
           args_(std::move(args)),
           chan_(chan)
     {
     }
 
     CallContext(CallContext&& other)
-        : msg_(std::move(other.msg_)),
+        : size_(other.size_),
+          msg_(std::move(other.msg_)),
           gsscred_(std::move(other.gsscred_)),
           args_(std::move(other.args_)),
           chan_(std::move(other.chan_)),
           svc_(std::move(other.svc_)),
           client_(std::move(other.client_))
-     {
-     }
+    {
+    }
 
     ~CallContext()
     {
         if (args_)
             chan_->releaseBuffer(std::move(args_));
     }
+
+    size_t size() const { return size_; }
 
     void setService(Service svc)
     {
@@ -163,7 +167,7 @@ public:
     uint32_t proc() const { return msg_.cbody().proc; }
     GssCred& gsscred() { return gsscred_; }
 
-    void run()
+    void operator()()
     {
         try {
             svc_(std::move(*this));
@@ -301,6 +305,9 @@ private:
             return true;
         }
     }
+
+    /// Size in bytes of the wire format message
+    size_t size_;
 
     /// RPC Message for this call
     rpc_msg msg_;

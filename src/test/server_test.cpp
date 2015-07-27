@@ -214,6 +214,86 @@ TEST_F(ServerTest, Listen)
     EXPECT_GE(::unlink(sun.sun_path), 0);
 }
 
+struct ThreadPool
+{
+    ThreadPool(Service svc, int workerCount)
+    {
+        for (int i = 0; i < workerCount; i++)
+            workers_.emplace_back(this, svc);
+    }
+
+    ~ThreadPool()
+    {
+        EXPECT_EQ(pending_, 0);
+    }
+
+    void dispatch(CallContext&& ctx)
+    {
+        pending_ += ctx.size();
+        VLOG(2) << "xid: " << ctx.msg().xid
+                << ": dispatching to worker " << nextWorker_
+                << ", pending: " << pending_ << " bytes";
+        workers_[nextWorker_].add(move(ctx));
+        nextWorker_++;
+        if (nextWorker_ == workers_.size())
+            nextWorker_ = 0;
+    }
+
+    struct Worker
+    {
+        Worker(ThreadPool* pool, Service svc)
+            : pool_(pool),
+              svc_(svc)
+        {
+            thread_ = thread([this]() {
+                unique_lock<mutex> lock(mutex_);
+                while (!stopping_) {
+                    VLOG(2) << "queue size " << work_.size();
+                    if (work_.size() > 0) {
+                        auto ctx = move(work_.front());
+                        work_.pop_front();
+                        lock.unlock();
+                        //std::this_thread::sleep_for(10ms);
+                        VLOG(2) << "xid: " << ctx.msg().xid << ": running";
+                        ctx();
+                        pool_->pending_ -= ctx.size();
+                        lock.lock();
+                    }
+                    if (work_.size() == 0)
+                        cv_.wait(lock);
+                }
+            });
+        }
+
+        ~Worker()
+        {
+            stopping_ = true;
+            cv_.notify_one();
+            thread_.join();
+        }
+
+        void add(CallContext&& ctx)
+        {
+            ctx.setService(svc_);
+            unique_lock<mutex> lock(mutex_);
+            work_.emplace_back(move(ctx));
+            cv_.notify_one();
+        }
+
+        thread thread_;
+        mutex mutex_;
+        condition_variable cv_;
+        deque<CallContext> work_;
+        bool stopping_ = false;
+        ThreadPool* pool_;
+        Service svc_;
+    };
+
+    deque<Worker> workers_;
+    int nextWorker_ = 0;
+    atomic<int> pending_;
+};
+
 TEST_F(ServerTest, MultiThread)
 {
     int sockpair[2];
@@ -227,74 +307,6 @@ TEST_F(ServerTest, MultiThread)
     sockman->add(schan);
     thread t([sockman]() { sockman->run(); });
 
-    struct ThreadPool
-    {
-        ThreadPool(Service svc, int workerCount)
-        {
-            for (int i = 0; i < workerCount; i++)
-                workers_.emplace_back(svc);
-        }
-
-        void dispatch(CallContext&& ctx)
-        {
-            VLOG(2) << "xid: " << ctx.msg().xid
-                    << ": dispatching to worker " << nextWorker_;
-            workers_[nextWorker_].add(move(ctx));
-            nextWorker_++;
-            if (nextWorker_ == workers_.size())
-                nextWorker_ = 0;
-        }
-
-        struct Worker
-        {
-            Worker(Service svc)
-                : svc_(svc)
-            {
-                thread_ = thread([this]() {
-                    unique_lock<mutex> lock(mutex_);
-                    while (!stopping_) {
-                        VLOG(2) << "queue size " << work_.size();
-                        if (work_.size() > 0) {
-                            auto ctx = move(work_.front());
-                            work_.pop_front();
-                            ctx.setService(svc_);
-                            lock.unlock();
-                            //std::this_thread::sleep_for(10ms);
-                            VLOG(2) << "xid: " << ctx.msg().xid << ": running";
-                            ctx.run();
-                            lock.lock();
-                        }
-                        if (work_.size() == 0)
-                            cv_.wait(lock);
-                    }
-                });
-            }
-
-            ~Worker()
-            {
-                stopping_ = true;
-                cv_.notify_one();
-                thread_.join();
-            }
-
-            void add(CallContext&& ctx)
-            {
-                unique_lock<mutex> lock(mutex_);
-                work_.emplace_back(move(ctx));
-                cv_.notify_one();
-            }
-
-            thread thread_;
-            mutex mutex_;
-            condition_variable cv_;
-            deque<CallContext> work_;
-            bool stopping_ = false;
-            Service svc_;
-        };
-
-        deque<Worker> workers_;
-        int nextWorker_ = 0;
-    };
 
     // Wrap the test service with a simple thread pool dispatcher
     auto svc = svcreg->lookup(1234, 1);

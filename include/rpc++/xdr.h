@@ -575,10 +575,20 @@ public:
         readCursor_ = buf_;
     }
 
+    size_t writeSize() const
+    {
+        return writeLimit_ - buf_;
+    }
+
     void setWriteSize(size_t sz)
     {
         assert(sz <= size_);
         writeLimit_ = buf_ + sz;
+    }
+
+    size_t readSize() const
+    {
+        return readLimit_ - buf_;
     }
 
     void setReadSize(size_t sz)
