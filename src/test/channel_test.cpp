@@ -20,6 +20,18 @@ public:
     {
     }
 
+    Address makeLocalAddress()
+    {
+        char tmp[] = "/tmp/rpcTestXXXXX";
+        return Address(string("unix://") + mktemp(tmp));
+    }
+
+    void unlinkLocalAddress(const Address& addr)
+    {
+        auto p = reinterpret_cast<const sockaddr_un*>(addr.addr());
+        ::unlink(p->sun_path);
+    }
+
     /// Call a simple echo service with the given procedure number
     void simpleCall(
         shared_ptr<Channel> chan, shared_ptr<Client> client, uint32_t proc)
@@ -83,6 +95,7 @@ public:
 
                     xdr(call_msg, dec);
                     auto& cbody = call_msg.cbody();
+                    VLOG(3) << "xid: " << call_msg.xid << ": received call";
                     if (cbody.proc == 1)
                         xdr(val, dec);
                     sendMessage();
@@ -97,6 +110,7 @@ public:
                     if (cbody.proc == 1)
                         xdr(val, enc);
                     endReceive();
+                    VLOG(3) << "xid: " << call_msg.xid << ": sent reply";
 
                     if (cbody.proc == 2)
                         stopping = true;
@@ -251,7 +265,7 @@ public:
     }
 
     unique_ptr<XdrMemory> receiveMessage(
-        std::chrono::system_clock::duration timeout) override
+        shared_ptr<Channel>&, std::chrono::system_clock::duration timeout) override
     {
         return nullptr;
     }
@@ -358,71 +372,47 @@ TEST_F(ChannelTest, LocalManyThreads)
 TEST_F(ChannelTest, DatagramChannel)
 {
     // Make a local socket to listen on
-    char tmp[] = "/tmp/rpcTestXXXXX";
-    sockaddr_un saddr;
-    saddr.sun_len = sizeof(saddr);
-    saddr.sun_family = AF_LOCAL;
-    strcpy(saddr.sun_path, mktemp(tmp));
-
+    Address saddr = makeLocalAddress();
     int ssock = socket(AF_LOCAL, SOCK_DGRAM, 0);
-    ASSERT_GE(::bind(ssock, reinterpret_cast<const sockaddr*>(&saddr),
-                     sizeof(saddr)), 0);
+    ASSERT_GE(::bind(ssock, saddr.addr(), saddr.len()), 0);
 
     SimpleDatagramServer server(ssock);
 
     // Make a suitable address for the channel to receive replies
-    char tmp2[] = "/tmp/rpcTestXXXXX";
-    sockaddr_un claddr;
-    claddr.sun_len = sizeof(claddr);
-    claddr.sun_family = AF_LOCAL;
-    strcpy(claddr.sun_path, mktemp(tmp2));
+    Address caddr = makeLocalAddress();
 
     // Bind to our reply address and connect to the server address
     int clsock = socket(AF_LOCAL, SOCK_DGRAM, 0);
-    ASSERT_GE(::bind(clsock, reinterpret_cast<const sockaddr*>(&claddr),
-                     sizeof(claddr)), 0);
-    ASSERT_GE(::connect(clsock, reinterpret_cast<sockaddr*>(&saddr),
-                        sizeof(saddr)), 0);
+    auto chan = make_shared<DatagramChannel>(clsock);
+    chan->bind(caddr);
+    chan->connect(saddr);
 
     // Send a message and check the reply
-    auto chan = make_shared<DatagramChannel>(clsock);
     simpleCall(chan, client, 1);
 
     server.stop(chan, client);
 
-    ::unlink(saddr.sun_path);
-    ::unlink(claddr.sun_path);
+    unlinkLocalAddress(saddr);
+    unlinkLocalAddress(caddr);
 }
 
 TEST_F(ChannelTest, DatagramManyThreads)
 {
     // Make a local socket to listen on
-    char tmp[] = "/tmp/rpcTestXXXXX";
-    sockaddr_un saddr;
-    saddr.sun_len = sizeof(saddr);
-    saddr.sun_family = AF_LOCAL;
-    strcpy(saddr.sun_path, mktemp(tmp));
-
+    Address saddr = makeLocalAddress();
     int ssock = socket(AF_LOCAL, SOCK_DGRAM, 0);
-    ASSERT_GE(::bind(ssock, reinterpret_cast<const sockaddr*>(&saddr),
-                     sizeof(saddr)), 0);
+    ASSERT_GE(::bind(ssock, saddr.addr(), saddr.len()), 0);
 
     SimpleDatagramServer server(ssock);
 
     // Make a suitable address for the channel to receive replies
-    char tmp2[] = "/tmp/rpcTestXXXXX";
-    sockaddr_un claddr;
-    claddr.sun_len = sizeof(claddr);
-    claddr.sun_family = AF_LOCAL;
-    strcpy(claddr.sun_path, mktemp(tmp2));
+    Address caddr = makeLocalAddress();
 
     // Bind to our reply address and connect to the server address
     int clsock = socket(AF_LOCAL, SOCK_DGRAM, 0);
-    ASSERT_GE(::bind(clsock, reinterpret_cast<const sockaddr*>(&claddr),
-                     sizeof(claddr)), 0);
-    ASSERT_GE(::connect(clsock, reinterpret_cast<sockaddr*>(&saddr),
-                        sizeof(saddr)), 0);
     auto chan = make_shared<DatagramChannel>(clsock);
+    chan->bind(caddr);
+    chan->connect(saddr);
 
     int threadCount = 20;
     int iterations = 200;
@@ -437,8 +427,8 @@ TEST_F(ChannelTest, DatagramManyThreads)
     // Ask the server to stop running
     server.stop(chan, client);
 
-    ASSERT_GE(::unlink(saddr.sun_path), 0);
-    ASSERT_GE(::unlink(claddr.sun_path), 0);
+    unlinkLocalAddress(saddr);
+    unlinkLocalAddress(caddr);
 }
 
 TEST_F(ChannelTest, StreamChannel)

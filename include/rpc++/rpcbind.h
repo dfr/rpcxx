@@ -4,7 +4,6 @@
 
 #include <rpc++/channel.h>
 #include <rpc++/client.h>
-#include <rpc++/util.h>
 #include <rpc++/xdr.h>
 
 namespace oncrpc {

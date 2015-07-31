@@ -54,7 +54,7 @@ public:
                     const vector<uint8_t>& res,
                     rpc_msg* reply_msg = nullptr)
     {
-        LocalChannel chan(svcreg);
+        auto chan = make_shared<LocalChannel>(svcreg);
 
         call_body cbody;
         cbody.prog = prog;
@@ -63,12 +63,13 @@ public:
         cbody.cred = { AUTH_NONE, {} };
         cbody.verf = { AUTH_NONE, {} };
         rpc_msg msg(1, std::move(cbody));
-        auto xdrout = chan.acquireBuffer();
+        auto xdrout = chan->acquireBuffer();
         xdr(msg, static_cast<XdrSink*>(xdrout.get()));
         xdrout->putBytes(args.data(), args.size());
-        chan.sendMessage(move(xdrout));
+        chan->sendMessage(move(xdrout));
 
-        auto xdrin = chan.receiveMessage(0s);
+        shared_ptr<Channel> p;
+        auto xdrin = chan->receiveMessage(p, 0s);
         xdr(msg, static_cast<XdrSource*>(xdrin.get()));
         EXPECT_EQ(msg.xid, 1);
         EXPECT_EQ(msg.mtype, REPLY);
@@ -80,7 +81,7 @@ public:
         xdrin->getBytes(t.data(), t.size());
         EXPECT_EQ(res, t);
 
-        chan.releaseBuffer(move(xdrin));
+        chan->releaseBuffer(move(xdrin));
 
         if (reply_msg)
             *reply_msg = std::move(msg);
@@ -90,6 +91,40 @@ public:
     shared_ptr<Client> client;
 };
 
+/// A datagram socket using AF_LOCAL sockets, autogenerating a random
+/// local address
+class LocalDatagramChannel: public DatagramChannel
+{
+public:
+    LocalDatagramChannel(shared_ptr<ServiceRegistry> svcreg = nullptr)
+        : DatagramChannel(::socket(AF_LOCAL, SOCK_DGRAM, 0), svcreg),
+          path_(makePath()),
+          addr_("unix://" + path_)
+    {
+        bind(localAddr());
+    }
+
+    ~LocalDatagramChannel()
+    {
+        ::unlink(path_.c_str());
+    }
+
+    const Address& localAddr() const
+    {
+        return addr_;
+    }
+
+    static string makePath()
+    {
+        char tmp[] = "/tmp/rpcTestXXXXX";
+        return mktemp(tmp);
+    }
+
+private:
+    string path_;
+    Address addr_;
+};
+
 TEST_F(ServerTest, Lookup)
 {
     EXPECT_NE(svcreg->lookup(1234, 1), nullptr);
@@ -97,7 +132,7 @@ TEST_F(ServerTest, Lookup)
 
 TEST_F(ServerTest, ProtocolMismatch)
 {
-    LocalChannel chan(svcreg);
+    auto chan = make_shared<LocalChannel>(svcreg);
 
     // Check RPC_MISMATCH is generated for rpcvers other than 2
     call_body cbody;
@@ -106,13 +141,14 @@ TEST_F(ServerTest, ProtocolMismatch)
     cbody.vers = 0;
     cbody.proc = 0;
     rpc_msg msg(1, std::move(cbody));
-    auto xdrout = chan.acquireBuffer();
+    auto xdrout = chan->acquireBuffer();
     xdr(msg, static_cast<XdrSink*>(xdrout.get()));
-    chan.sendMessage(move(xdrout));
+    chan->sendMessage(move(xdrout));
 
-    auto xdrin = chan.receiveMessage(0s);
+    shared_ptr<Channel> p;
+    auto xdrin = chan->receiveMessage(p, 0s);
     xdr(msg, static_cast<XdrSource*>(xdrin.get()));
-    chan.releaseBuffer(move(xdrin));
+    chan->releaseBuffer(move(xdrin));
     EXPECT_EQ(msg.xid, 1);
     EXPECT_EQ(msg.mtype, REPLY);
     EXPECT_EQ(msg.rbody().stat, MSG_DENIED);
@@ -148,6 +184,27 @@ TEST_F(ServerTest, Success)
 {
     checkReply(1234, 1, 0, SUCCESS, {}, {});
     checkReply(1234, 1, 1, SUCCESS, {1,2,3,4}, {1,2,3,4});
+}
+
+TEST_F(ServerTest, Datagram)
+{
+    auto schan = make_shared<LocalDatagramChannel>(svcreg);
+    auto cchan = make_shared<LocalDatagramChannel>();
+    schan->connect(cchan->localAddr());
+    cchan->connect(schan->localAddr());
+
+    auto sockman = make_shared<SocketManager>();
+    sockman->add(schan);
+    thread server([sockman]() { sockman->run(); });
+
+    // Send a message and check the reply
+    cchan->call(
+        client.get(), 1,
+        [](XdrSink* xdrs) { uint32_t v = 123; xdr(v, xdrs); },
+        [](XdrSource* xdrs) { uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
+
+    sockman->stop();
+    server.join();
 }
 
 TEST_F(ServerTest, Stream)
@@ -217,6 +274,7 @@ TEST_F(ServerTest, Listen)
 struct ThreadPool
 {
     ThreadPool(Service svc, int workerCount)
+        : pending_(0)
     {
         for (int i = 0; i < workerCount; i++)
             workers_.emplace_back(this, svc);

@@ -33,7 +33,7 @@ int test_client(const vector<string>& args)
     }
 
     try {
-        auto chan = connectChannel(host, 123456, 1, "tcp");
+        auto chan = Channel::open(host, 123456, 1, "tcp");
         for (auto i = int(GssService::NONE);
              i <= int(GssService::PRIVACY); ++i) {
             auto service = GssService(i);

@@ -3,7 +3,6 @@
 
 #include <rpc++/errors.h>
 #include <rpc++/gss.h>
-#include <rpc++/util.h>
 
 namespace oncrpc {
 namespace _detail {

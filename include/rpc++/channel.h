@@ -16,7 +16,6 @@
 #include <rpc++/rpcproto.h>
 #include <rpc++/socket.h>
 #include <rpc++/timeout.h>
-#include <rpc++/util.h>
 #include <rpc++/xdr.h>
 
 namespace oncrpc {
@@ -35,6 +34,19 @@ protected:
 public:
     typedef std::chrono::system_clock clock_type;
     static std::chrono::seconds maxBackoff;
+
+    /// Helper function for creating and opening channels
+    static std::shared_ptr<Channel> open(const AddressInfo& ai);
+    static std::shared_ptr<Channel> open(
+        const std::vector<AddressInfo>& addrs);
+    static std::shared_ptr<Channel> open(
+        const std::string& host, uint32_t prog, uint32_t vers,
+        const std::string& netid);
+    static std::shared_ptr<Channel> open(
+        const std::string& host, const std::string& service,
+        const std::string& netid);
+    static std::shared_ptr<Channel> open(
+        const std::string& url, const std::string& netid);
 
     /// Create an RPC channel
     Channel();
@@ -85,7 +97,7 @@ public:
     /// If no message was received before the timeout, a null pointer is
     /// returned.
     virtual std::unique_ptr<XdrMemory> receiveMessage(
-        clock_type::duration timeout) = 0;
+        std::shared_ptr<Channel>& replyChan, clock_type::duration timeout) = 0;
 
 protected:
 
@@ -141,6 +153,7 @@ public:
     void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
     void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
     std::unique_ptr<XdrMemory> receiveMessage(
+        std::shared_ptr<Channel>& replyChan,
         clock_type::duration timeout) override;
 
     /// Process a single queued reply - intended for testing
@@ -160,7 +173,7 @@ private:
         void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
         void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
         std::unique_ptr<XdrMemory> receiveMessage(
-            clock_type::duration timeout) override;
+            std::shared_ptr<Channel>& replyChan, clock_type::duration timeout) override;
 
         LocalChannel* chan_;
     };
@@ -188,16 +201,37 @@ public:
     DatagramChannel(int sock);
     DatagramChannel(int sock, std::shared_ptr<ServiceRegistry>);
 
+    // Socket overrides
+    void connect(const Address& addr) override;
+
     // Channel overrides
     std::unique_ptr<XdrMemory> acquireBuffer() override;
     void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
     void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
     std::unique_ptr<XdrMemory> receiveMessage(
+        std::shared_ptr<Channel>& replyChan,
         clock_type::duration timeout) override;
 
-private:
+protected:
+    Address remoteAddr_;
     size_t bufferSize_;
     std::unique_ptr<XdrMemory> xdrs_;
+};
+
+struct DatagramReplyChannel: public DatagramChannel
+{
+public:
+    DatagramReplyChannel(int fd_, const Address& addr)
+        : DatagramChannel(fd_)
+    {
+        remoteAddr_ = addr;
+    }
+
+    ~DatagramReplyChannel()
+    {
+        // Don't close the socket
+        fd_ = -1;
+    }
 };
 
 /// Send RPC messages over a connected stream socket. Thread safe.
@@ -214,9 +248,11 @@ public:
     void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
     void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
     std::unique_ptr<XdrMemory> receiveMessage(
+        std::shared_ptr<Channel>& replyChan,
         clock_type::duration timeout) override;
 
 private:
+    void readAll(void* buf, size_t len);
     ptrdiff_t write(const void* buf, size_t len);
 
     size_t bufferSize_;

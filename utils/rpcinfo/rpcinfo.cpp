@@ -142,7 +142,7 @@ shared_ptr<Channel> connectChannel(
     const string& host, const options& opts)
 {
     try {
-        return connectChannel(host, to_string(opts.port), opts.transport);
+        return Channel::open(host, to_string(opts.port), opts.transport);
     }
     catch (runtime_error& e) {
         cout << "rpcinfo: " << e.what() << endl;
@@ -271,8 +271,7 @@ void ping(const vector<string>& args, const options& opts)
         exit(1);
     }
 
-    auto addr = uaddr2taddr(uaddr, opts.transport);
-    auto chan = connectChannel(move(addr));
+    auto chan = Channel::open(uaddr2taddr(uaddr, opts.transport));
 
     vector<uint32_t> versions;
     if (args.size() == 3)

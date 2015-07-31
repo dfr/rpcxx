@@ -92,7 +92,6 @@ main(int argc, char* const argv[])
         if (generateClient) {
             str << "#include <rpc++/channel.h>" << endl;
             str << "#include <rpc++/client.h>" << endl;
-            str << "#include <rpc++/util.h>" << endl;
         }
 
         for (const auto& ns: namespaces)

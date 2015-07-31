@@ -5,9 +5,134 @@
 
 #include <rpc++/errors.h>
 #include <rpc++/socket.h>
-#include <rpc++/util.h>
 
 using namespace oncrpc;
+
+namespace {
+
+struct UrlParser
+{
+    UrlParser(const std::string& url)
+    {
+        std::string s = url;
+        parseScheme(s);
+        schemeSpecific = s;
+        if (isHostbased()) {
+            if (s.substr(0, 2) != "//")
+                throw RpcError("malformed url");
+            s = s.substr(2);
+            parseHost(s);
+            if (s[0] == ':') {
+                s = s.substr(1);
+                parsePort(s);
+            }
+        }
+        else if (scheme == "unix") {
+            if (s.substr(0, 2) != "//")
+                throw RpcError("malformed url");
+            path = s.substr(2);
+        }
+    }
+
+    bool isHostbased()
+    {
+        return scheme == "tcp" || scheme == "udp" || scheme == "http" ||
+            scheme == "https" || scheme == "nfs";
+    }
+
+    void parseScheme(std::string& s)
+    {
+        scheme = "";
+        if (!std::isalpha(s[0]))
+            throw RpcError("malformed url");
+        while (s.size() > 0 && s[0] != ':') {
+            if (!std::isalpha(s[0]))
+                throw RpcError("malformed url");
+            scheme += s[0];
+            s = s.substr(1);
+        }
+        if (s.size() == 0 || s[0] != ':')
+            throw RpcError("malformed url");
+        s = s.substr(1);
+    }
+
+    void parseHost(std::string& s)
+    {
+        if (s.size() == 0)
+            return;
+        if (std::isdigit(s[0])) {
+            parseIPv4(s);
+        }
+        else if (s[0] == '[') {
+            parseIPv6(s);
+        }
+        else {
+            int i = 0;
+            while (i < s.size() && s[0] != ':' && s[0] != '/')
+                i++;
+            host = s.substr(0, i);
+            s = s.substr(i);
+        }
+    }
+
+    void parseIPv4(std::string& s)
+    {
+        host = "";
+        for (int i = 0; i < 4; i++) {
+            if (s.size() == 0)
+                throw RpcError("malformed IPv4 address");
+            if (i > 0) {
+                if (s[0] != '.')
+                    throw RpcError("malformed IPv4 address");
+                host += '.';
+                s = s.substr(1);
+                if (s.size() == 0)
+                    throw RpcError("malformed IPv4 address");
+            }
+            while (s.size() > 0 && std::isdigit(s[0])) {
+                host += s[0];
+                s = s.substr(1);
+            }
+        }
+    }
+
+    void parseIPv6(std::string& s)
+    {
+        std::vector<std::uint16_t> parts;
+
+        host = '[';
+        auto i = s.find(']');
+        if (i == std::string::npos)
+            throw RpcError("malformed IPv6 address");
+        auto t = s.substr(1, i - 1);
+        s = s.substr(i + 1);
+        while (t.size() > 0 &&
+               (std::isxdigit(t[0]) || t[0] == ':' || t[0] == '.')) {
+            host += t[0];
+            t = t.substr(1);
+        }
+        if (t.size() != 0)
+            throw RpcError("malformed IPv6 address");
+        host += ']';
+    }
+
+    void parsePort(std::string& s)
+    {
+        port = "";
+        while (s.size() > 0 && std::isdigit(s[0])) {
+            port += s[0];
+            s = s.substr(1);
+        }
+    }
+
+    std::string scheme;
+    std::string schemeSpecific;
+    std::string host;
+    std::string port;
+    std::string path;
+};
+
+}
 
 std::pair<int, int> oncrpc::getNetId(const std::string& netid)
 {
@@ -24,16 +149,53 @@ std::pair<int, int> oncrpc::getNetId(const std::string& netid)
     throw RpcError("Bad netid");
 }
 
+Address::Address(const std::string& url)
+{
+    UrlParser p(url);
+    if (p.scheme == "unix") {
+        auto& sun = reinterpret_cast<sockaddr_un&>(addr_);
+        sun.sun_family = AF_LOCAL;
+        strlcpy(sun.sun_path, p.path.c_str(), sizeof(sun.sun_path));
+        sun.sun_len = SUN_LEN(&sun);
+    }
+    else if (p.scheme == "tcp" || p.scheme == "udp") {
+        auto host = p.host;
+        auto port = p.port.size() > 0 ? p.port : "0";
+
+        addrinfo hints;
+        addrinfo* addrs;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_flags = 0;
+        hints.ai_family = PF_UNSPEC;
+        if (std::isdigit(p.host[0])) {
+            hints.ai_flags = AI_NUMERICHOST;
+            hints.ai_flags = PF_INET;
+        }
+        else if (p.host[0] == '[') {
+            hints.ai_flags = AI_NUMERICHOST;
+            hints.ai_flags = PF_INET6;
+            host = host.substr(1, host.size() - 2);
+        }
+        hints.ai_socktype = p.scheme == "tcp" ? SOCK_STREAM : SOCK_DGRAM;
+        int err = getaddrinfo(host.c_str(), port.c_str(), &hints, &addrs);
+        if (err)
+            throw RpcError(std::string("getaddrinfo: ") + gai_strerror(err));
+        *this = *addrs->ai_addr;
+        freeaddrinfo(addrs);
+    }
+    else {
+        throw RpcError("unsupported scheme: " + p.scheme);
+    }
+}
+
 AddressInfo::AddressInfo(addrinfo* ai)
     : flags(ai->ai_flags),
       family(ai->ai_family),
       socktype(ai->ai_socktype),
       protocol(ai->ai_protocol),
-      addrlen(ai->ai_addrlen),
-      addr(reinterpret_cast<sockaddr*>(&storage)),
+      addr(*ai->ai_addr),
       canonname(ai->ai_canonname ? ai->ai_canonname : "")
 {
-    memcpy(addr, ai->ai_addr, ai->ai_addrlen);
 }
 
 std::vector<AddressInfo> oncrpc::getAddressInfo(
@@ -59,6 +221,78 @@ std::vector<AddressInfo> oncrpc::getAddressInfo(
     ::freeaddrinfo(res0);
 
     return addrs;
+}
+
+std::vector<AddressInfo> oncrpc::getAddressInfo(
+    const std::string& url, const std::string& netid)
+{
+    UrlParser p(url);
+
+    auto host = p.host;
+    auto service = p.port.size() > 0 ? p.port : p.scheme;
+    addrinfo hints;
+    addrinfo* res0;
+    memset(&hints, 0, sizeof hints);
+    auto nt = getNetId(netid);
+    hints.ai_family = std::get<0>(nt);
+    hints.ai_socktype = std::get<1>(nt);
+    if (std::isdigit(p.host[0])) {
+        hints.ai_flags = AI_NUMERICHOST;
+        hints.ai_flags = PF_INET;
+    }
+    else if (p.host[0] == '[') {
+        hints.ai_flags = AI_NUMERICHOST;
+        hints.ai_flags = PF_INET6;
+        host = host.substr(1, host.size() - 2);
+    }
+    int err = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &res0);
+    if (err) {
+        std::ostringstream msg;
+        msg << "RPC: " << host << ":" << service << ": " << gai_strerror(err);
+        throw RpcError(msg.str());
+    }
+
+    std::vector<AddressInfo> addrs;
+    for (addrinfo* res = res0; res; res = res->ai_next)
+        addrs.emplace_back(res);
+    ::freeaddrinfo(res0);
+
+    return addrs;
+}
+
+AddressInfo oncrpc::uaddr2taddr(
+    const std::string& uaddr, const std::string& netid)
+{
+    auto portloIndex = uaddr.rfind('.');
+    if (portloIndex == std::string::npos)
+        throw RpcError(
+            "malformed address from remote rpcbind: " + uaddr);
+    auto porthiIndex = uaddr.rfind('.', portloIndex - 1);
+    if (porthiIndex == std::string::npos)
+        throw RpcError(
+            "malformed address from remote rpcbind: " + uaddr);
+    auto host = uaddr.substr(0, porthiIndex);
+    auto porthi = std::stoi(
+        uaddr.substr(porthiIndex + 1, portloIndex - porthiIndex - 1));
+    auto portlo = std::stoi(uaddr.substr(portloIndex + 1));
+    auto port = (porthi << 8) + portlo;
+
+    addrinfo hints;
+    addrinfo* addrs;
+    memset(&hints, 0, sizeof(hints));
+    auto nt = getNetId(netid);
+    hints.ai_flags = AI_NUMERICHOST;
+    hints.ai_family = std::get<0>(nt);
+    hints.ai_socktype = std::get<1>(nt);
+    std::string service = std::to_string(port);
+
+    int err = getaddrinfo(host.c_str(), service.c_str(), &hints, &addrs);
+    if (err)
+        throw RpcError(std::string("getaddrinfo: ") + gai_strerror(err));
+
+    AddressInfo ai(addrs);
+    freeaddrinfo(addrs);
+    return ai;
 }
 
 SocketManager::SocketManager()
@@ -104,12 +338,16 @@ SocketManager::run()
         lock.unlock();
         auto stopTime = next();
         auto now = clock_type::now();
-        int timeout = std::chrono::duration_cast<std::chrono::microseconds>(
+        auto timeout = std::chrono::duration_cast<std::chrono::microseconds>(
             stopTime - now).count();
         if (timeout < 0)
             timeout = 0;
-        VLOG(3) << "sleeping for " << timeout << "us";
-        ::timeval tv { timeout / 1000000, timeout % 1000000 };
+        auto sec = timeout / 1000000;
+        auto usec = timeout % 1000000;
+        if (sec > 999999)
+            sec = 999999; //std::numeric_limits<int>::max();
+        VLOG(3) << "sleeping for " << sec << "." << usec << "s";
+        ::timeval tv { int(sec), int(usec) };
         auto nready = ::select(maxfd + 1, &rset, nullptr, nullptr, &tv);
         if (nready < 0) {
             throw std::system_error(errno, std::system_category());

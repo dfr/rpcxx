@@ -131,7 +131,7 @@ void ProgramVersion::printClientStubs(
         << indent << className << "("
         << "const std::string& host, Args&&... args)" << endl;
     ++indent;
-    str << indent << ": channel_(oncrpc::connectChannel(host, "
+    str << indent << ": channel_(oncrpc::Channel::open(host, "
         << def->name() << ", " << name_
         << ", \"tcp\"))," << endl
         << indent << "  client_(std::make_shared<CL>(" << endl;

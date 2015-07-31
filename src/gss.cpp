@@ -5,7 +5,6 @@
 #include <rpc++/channel.h>
 #include <rpc++/errors.h>
 #include <rpc++/gss.h>
-#include <rpc++/util.h>
 
 using namespace oncrpc;
 using namespace oncrpc::_detail;

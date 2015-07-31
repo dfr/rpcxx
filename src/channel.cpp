@@ -8,6 +8,7 @@
 #include <rpc++/channel.h>
 #include <rpc++/client.h>
 #include <rpc++/errors.h>
+#include <rpc++/rpcbind.h>
 #include <rpc++/rec.h>
 #include <rpc++/server.h>
 #include <rpc++/xdr.h>
@@ -33,6 +34,60 @@ static auto toMilliseconds(Dur dur)
 }
 
 std::chrono::seconds Channel::maxBackoff(30);
+
+std::shared_ptr<Channel> Channel::open(const AddressInfo& ai)
+{
+    int s = socket(ai.family, ai.socktype, ai.protocol);
+    if (s < 0) {
+        throw std::system_error(errno, std::system_category());
+    }
+    if (ai.socktype == SOCK_STREAM) {
+        auto chan = std::make_shared<StreamChannel>(s);
+        chan->connect(ai.addr);
+        return chan;
+    }
+    else {
+        auto chan = std::make_shared<DatagramChannel>(s);
+        chan->connect(ai.addr);
+        return chan;
+    }
+}
+
+std::shared_ptr<Channel> Channel::open(const std::vector<AddressInfo>& addrs)
+{
+    std::exception_ptr lastError;
+    assert(addrs.size() > 0);
+    for (auto& ai: addrs) {
+        try {
+            auto chan = Channel::open(ai);
+            return chan;
+        }
+        catch (std::system_error& e) {
+            lastError = std::current_exception();
+        }
+    }
+    std::rethrow_exception(lastError);
+}
+
+std::shared_ptr<Channel> Channel::open(
+    const std::string& host, uint32_t prog, uint32_t vers,
+    const std::string& netid)
+{
+    auto rpcbind = RpcBind(Channel::open(host, "sunrpc", netid));
+    auto uaddr = rpcbind.getaddr(rpcb{prog, vers, "", "", ""});
+    if (uaddr == "") {
+        throw RpcError("Program not registered");
+    }
+    return Channel::open(uaddr2taddr(uaddr, netid));
+}
+
+std::shared_ptr<Channel> Channel::open(
+    const std::string& host, const std::string& service,
+    const std::string& netid)
+{
+    return Channel::open(getAddressInfo(host, service, netid));
+}
+
 
 Channel::Channel()
     : xid_(nextXid())
@@ -257,6 +312,7 @@ bool Channel::processIncomingMessage(
     auto now = clock_type::now();
     auto timeoutPoint = now + timeout;
     std::unique_ptr<XdrMemory> body;
+    std::shared_ptr<Channel> replyChan;
     while (!body) {
         clock_type::time_point stopPoint;
         if (tman_) {
@@ -270,7 +326,7 @@ bool Channel::processIncomingMessage(
                 << (tx.xid ? "client" : "server") << ")";
         lock.unlock();
         if (tman_) tman_->update(now);
-        body = receiveMessage(stopPoint - now);
+        body = receiveMessage(replyChan, stopPoint - now);
         lock.lock();
         if (body)
             break;
@@ -320,7 +376,7 @@ bool Channel::processIncomingMessage(
     else if (msg.mtype == CALL && svcreg_) {
         lock.unlock();
         svcreg_->process(
-            CallContext(std::move(msg), std::move(body), shared_from_this()));
+            CallContext(std::move(msg), std::move(body), replyChan));
         return true;
     }
 
@@ -465,14 +521,16 @@ LocalChannel::ReplyChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
 
 std::unique_ptr<XdrMemory>
 LocalChannel::ReplyChannel::receiveMessage(
-    clock_type::duration timeout)
+    std::shared_ptr<Channel>&, clock_type::duration)
 {
     return nullptr;
 }
 
 std::unique_ptr<XdrMemory>
-LocalChannel::receiveMessage(clock_type::duration timeout)
+LocalChannel::receiveMessage(
+    std::shared_ptr<Channel>& replyChan, clock_type::duration timeout)
 {
+    replyChan = shared_from_this();
     std::unique_lock<std::mutex> lock(mutex_);
     if (queue_.size() == 0)
         return nullptr;
@@ -543,6 +601,12 @@ DatagramChannel::DatagramChannel(
     svcreg_ = svcreg;
 }
 
+void
+DatagramChannel::connect(const Address& addr)
+{
+    remoteAddr_ = addr;
+}
+
 std::unique_ptr<XdrMemory>
 DatagramChannel::acquireBuffer()
 {
@@ -567,12 +631,13 @@ DatagramChannel::releaseBuffer(std::unique_ptr<XdrMemory>&& msg)
 void
 DatagramChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
 {
-    ::write(fd_, msg->buf(), msg->writePos());
+    sendto(msg->buf(), msg->writePos(), remoteAddr_);
     releaseBuffer(std::move(msg));
 }
 
 std::unique_ptr<XdrMemory>
-DatagramChannel::receiveMessage(clock_type::duration timeout)
+DatagramChannel::receiveMessage(
+    std::shared_ptr<Channel>& replyChan, clock_type::duration timeout)
 {
     if (!waitForReadable(timeout))
         return nullptr;
@@ -586,11 +651,15 @@ DatagramChannel::receiveMessage(clock_type::duration timeout)
     if (!msg)
         msg = std::make_unique<XdrMemory>(bufferSize_);
 
-    auto bytes = ::read(fd_, msg->buf(), msg->bufferSize());
-    if (bytes <= 0) {
-        throw std::system_error(errno, std::system_category());
-    }
-    msg->rewind();
+    Address addr;
+    auto bytes = recvfrom(msg->buf(), msg->bufferSize(), addr);
+    if (bytes == 0)
+        return nullptr;
+
+    // We could try to cache reply channels here but there is little point
+    // since the allocation is cheap and datagram sockets are discouraged
+    // for high-performance applications
+    replyChan = std::make_shared<DatagramReplyChannel>(fd_, addr);    msg->rewind();
     msg->setReadSize(bytes);
     return std::move(msg);
 }
@@ -653,39 +722,41 @@ StreamChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
     sendbuf_ = std::move(msg);
 }
 
-static void
-readAll(int sock, void* buf, size_t len)
+void
+StreamChannel::readAll(void* buf, size_t len)
 {
     auto p = reinterpret_cast<uint8_t*>(buf);
     auto n = len;
 
     while (n > 0) {
-        auto bytes = ::read(sock, p, n);
-        if (bytes <= 0)
-            throw std::system_error(errno, std::system_category());
+        auto bytes = recv(p, n);
+        if (bytes == 0)
+            throw std::system_error(ENOTCONN, std::system_category());
         p += bytes;
         n -= bytes;
     }
 }
 
 std::unique_ptr<XdrMemory>
-StreamChannel::receiveMessage(clock_type::duration timeout)
+StreamChannel::receiveMessage(
+    std::shared_ptr<Channel>& replyChan, clock_type::duration timeout)
 {
     if (!waitForReadable(timeout))
         return nullptr;
 
+    replyChan = shared_from_this();
     bool done = false;
     std::deque<std::unique_ptr<XdrMemory>> fragments;
     size_t total = 0;
     while (!done) {
         uint8_t recbuf[sizeof(uint32_t)];
-        readAll(fd_, recbuf, sizeof(uint32_t));
+        readAll(recbuf, sizeof(uint32_t));
         uint32_t rec = *reinterpret_cast<const XdrWord*>(recbuf);
         uint32_t reclen = rec & 0x7fffffff;
         done = (rec & (1 << 31)) != 0;
         VLOG(4) << reclen << " byte record, eor=" << done;
         auto frag = std::make_unique<XdrMemory>(reclen);
-        readAll(fd_, frag->buf(), reclen);
+        readAll(frag->buf(), reclen);
         VLOG(4) << "read fragment body";
         fragments.push_back(std::move(frag));
         total += reclen;
@@ -716,9 +787,9 @@ StreamChannel::write(const void* buf, size_t len)
 
     VLOG(3) << "writing " << len << " bytes to socket";
     while (n > 0) {
-        auto bytes = ::write(fd_, p, len);
-        if (bytes < 0)
-            throw std::system_error(errno, std::system_category());
+        auto bytes = send(p, len);
+        if (bytes == 0)
+            throw std::system_error(ENOTCONN, std::system_category());
         p += bytes;
         n -= bytes;
     }
