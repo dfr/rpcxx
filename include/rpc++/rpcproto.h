@@ -94,6 +94,15 @@ struct call_body {
           verf(std::move(other.verf))
     {
     }
+    call_body(
+        uint32_t a, uint32_t b, uint32_t c, opaque_auth&& d, opaque_auth&& e)
+        : prog(a),
+          vers(b),
+          proc(c),
+          cred(std::move(d)),
+          verf(std::move(e))
+    {
+    }
     uint32_t rpcvers = 2;
     uint32_t prog;
     uint32_t vers;

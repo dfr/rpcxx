@@ -48,6 +48,31 @@ public:
         svcreg->add(1234, 1, bind(&ServerTest::testService, this, _1));
     }
 
+    rpc_msg sendMessage(
+        rpc_msg&& call, const vector<uint8_t>& args, const vector<uint8_t>& res)
+    {
+        auto chan = make_shared<LocalChannel>(svcreg);
+
+        auto xdrout = chan->acquireBuffer();
+        xdr(call, static_cast<XdrSink*>(xdrout.get()));
+        xdrout->putBytes(args.data(), args.size());
+        chan->sendMessage(move(xdrout));
+
+        shared_ptr<Channel> p;
+        auto xdrin = chan->receiveMessage(p, 0s);
+        rpc_msg reply;
+        xdr(reply, static_cast<XdrSource*>(xdrin.get()));
+        if (reply.rbody().stat == MSG_ACCEPTED) {
+            vector<uint8_t> t;
+            t.resize(res.size());
+            xdrin->getBytes(t.data(), t.size());
+            EXPECT_EQ(res, t);
+        }
+        chan->releaseBuffer(move(xdrin));
+
+        return reply;
+    }
+
     void checkReply(uint32_t prog, uint32_t vers, uint32_t proc,
                     accept_stat expectedStat,
                     const vector<uint8_t>& args,
@@ -63,25 +88,12 @@ public:
         cbody.cred = { AUTH_NONE, {} };
         cbody.verf = { AUTH_NONE, {} };
         rpc_msg msg(1, std::move(cbody));
-        auto xdrout = chan->acquireBuffer();
-        xdr(msg, static_cast<XdrSink*>(xdrout.get()));
-        xdrout->putBytes(args.data(), args.size());
-        chan->sendMessage(move(xdrout));
+        msg = sendMessage(move(msg), args, res);
 
-        shared_ptr<Channel> p;
-        auto xdrin = chan->receiveMessage(p, 0s);
-        xdr(msg, static_cast<XdrSource*>(xdrin.get()));
-        EXPECT_EQ(msg.xid, 1);
-        EXPECT_EQ(msg.mtype, REPLY);
-        EXPECT_EQ(msg.rbody().stat, MSG_ACCEPTED);
-        EXPECT_EQ(msg.rbody().areply().stat, expectedStat);
-
-        vector<uint8_t> t;
-        t.resize(res.size());
-        xdrin->getBytes(t.data(), t.size());
-        EXPECT_EQ(res, t);
-
-        chan->releaseBuffer(move(xdrin));
+        EXPECT_EQ(1, msg.xid);
+        EXPECT_EQ(REPLY, msg.mtype);
+        EXPECT_EQ(MSG_ACCEPTED, msg.rbody().stat);
+        EXPECT_EQ(expectedStat, msg.rbody().areply().stat);
 
         if (reply_msg)
             *reply_msg = std::move(msg);
@@ -135,26 +147,15 @@ TEST_F(ServerTest, ProtocolMismatch)
     auto chan = make_shared<LocalChannel>(svcreg);
 
     // Check RPC_MISMATCH is generated for rpcvers other than 2
-    call_body cbody;
-    cbody.rpcvers = 3;
-    cbody.prog = 1234;
-    cbody.vers = 0;
-    cbody.proc = 0;
-    rpc_msg msg(1, std::move(cbody));
-    auto xdrout = chan->acquireBuffer();
-    xdr(msg, static_cast<XdrSink*>(xdrout.get()));
-    chan->sendMessage(move(xdrout));
-
-    shared_ptr<Channel> p;
-    auto xdrin = chan->receiveMessage(p, 0s);
-    xdr(msg, static_cast<XdrSource*>(xdrin.get()));
-    chan->releaseBuffer(move(xdrin));
-    EXPECT_EQ(msg.xid, 1);
-    EXPECT_EQ(msg.mtype, REPLY);
-    EXPECT_EQ(msg.rbody().stat, MSG_DENIED);
-    EXPECT_EQ(msg.rbody().rreply().stat, RPC_MISMATCH);
-    EXPECT_EQ(msg.rbody().rreply().rpc_mismatch.low, 2);
-    EXPECT_EQ(msg.rbody().rreply().rpc_mismatch.high, 2);
+    rpc_msg call(1, call_body(1234, 0, 0, {AUTH_DH, {}}, {AUTH_NONE, {}}));
+    call.cbody().rpcvers = 3;
+    auto msg = sendMessage(move(call), {}, {});
+    EXPECT_EQ(1, msg.xid);
+    EXPECT_EQ(REPLY, msg.mtype);
+    EXPECT_EQ(MSG_DENIED, msg.rbody().stat);
+    EXPECT_EQ(RPC_MISMATCH, msg.rbody().rreply().stat);
+    EXPECT_EQ(2, msg.rbody().rreply().rpc_mismatch.low);
+    EXPECT_EQ(2, msg.rbody().rreply().rpc_mismatch.high);
 }
 
 TEST_F(ServerTest, ProgramUnavailable)
@@ -166,8 +167,8 @@ TEST_F(ServerTest, ProgramMismatch)
 {
     rpc_msg reply_msg;
     checkReply(1234, 2, 0, PROG_MISMATCH, {}, {}, &reply_msg);
-    EXPECT_EQ(reply_msg.rbody().areply().mismatch_info.low, 1);
-    EXPECT_EQ(reply_msg.rbody().areply().mismatch_info.high, 1);
+    EXPECT_EQ(1, reply_msg.rbody().areply().mismatch_info.low);
+    EXPECT_EQ(1, reply_msg.rbody().areply().mismatch_info.high);
 }
 
 TEST_F(ServerTest, ProcedureUnavailable)
@@ -184,6 +185,33 @@ TEST_F(ServerTest, Success)
 {
     checkReply(1234, 1, 0, SUCCESS, {}, {});
     checkReply(1234, 1, 1, SUCCESS, {1,2,3,4}, {1,2,3,4});
+}
+
+TEST_F(ServerTest, AuthUnsupported)
+{
+    auto msg = sendMessage(
+        rpc_msg(1, call_body(1234, 0, 0, {AUTH_DH, {}}, {AUTH_NONE, {}})),
+        {}, {});
+
+    EXPECT_EQ(1, msg.xid);
+    EXPECT_EQ(REPLY, msg.mtype);
+    EXPECT_EQ(MSG_DENIED, msg.rbody().stat);
+    EXPECT_EQ(AUTH_ERROR, msg.rbody().rreply().stat);
+    EXPECT_EQ(AUTH_BADCRED, msg.rbody().rreply().auth_error);
+}
+
+TEST_F(ServerTest, AuthBadGssCred)
+{
+    auto msg = sendMessage(
+        rpc_msg(1, call_body(1234, 0, 0,
+            {RPCSEC_GSS, {1, 2, 3}}, {AUTH_NONE, {}})),
+        {}, {});
+
+    EXPECT_EQ(1, msg.xid);
+    EXPECT_EQ(REPLY, msg.mtype);
+    EXPECT_EQ(MSG_DENIED, msg.rbody().stat);
+    EXPECT_EQ(AUTH_ERROR, msg.rbody().rreply().stat);
+    EXPECT_EQ(AUTH_BADCRED, msg.rbody().rreply().auth_error);
 }
 
 TEST_F(ServerTest, Datagram)

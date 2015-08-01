@@ -28,6 +28,11 @@ class bounded_string: public std::string
 template <typename T, size_t N>
 class bounded_vector: public std::vector<T>
 {
+public:
+    bounded_vector() {}
+    bounded_vector(const bounded_vector& other) : std::vector<T>(other) {}
+    bounded_vector(std::initializer_list<T> init)
+        : std::vector<T>(init) {}
 };
 
 /// A 32-bit word stored in network byte order
