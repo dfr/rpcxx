@@ -88,6 +88,11 @@ std::shared_ptr<Channel> Channel::open(
     return Channel::open(getAddressInfo(host, service, netid));
 }
 
+std::shared_ptr<Channel> Channel::open(
+    const std::string& url, const std::string& netid)
+{
+    return Channel::open(getAddressInfo(url, netid));
+}
 
 Channel::Channel()
     : xid_(nextXid())
