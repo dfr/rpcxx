@@ -26,6 +26,6 @@ genrule(
     name = "test_client",
     srcs = ["test/test.x"],
     outs = ["test/test.h"],
-    cmd = "rpcgen -txics $(SRCS) > $(OUTS)",
+    cmd = "./rpcgen -txics $(SRCS) > $(OUTS)",
     tools = [":rpcgen"]
 )
