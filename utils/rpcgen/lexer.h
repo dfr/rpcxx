@@ -18,7 +18,7 @@ struct Location
     int column = 1;
 };
 
-static ostream&
+static inline ostream&
 operator<<(ostream& str, const Location& loc)
 {
     str << loc.filename << ":" << loc.line << ":" << loc.column;

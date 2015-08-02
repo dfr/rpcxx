@@ -75,7 +75,7 @@ Token::to_string(int type)
     for (const auto& i: keywords)
         if (type == i.second)
             return i.first;
-    
+
     if (type < 256) {
         ostringstream ss;
         ss << "'" << char(type) << "'";
@@ -155,7 +155,7 @@ Lexer::nextToken()
                 get();
                 while (isxdigit(peek())) {
                     ch = get();
-                    int digit;
+                    int digit = 0;
                     if (isdigit(ch))
                         digit = ch - '0';
                     else if (ch >= 'a' && ch <= 'f')
@@ -210,4 +210,3 @@ Lexer::peek()
 {
     return in_.peek();
 }
-

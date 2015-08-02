@@ -88,7 +88,6 @@ receive_token_from_peer(gss_buffer_t token)
     char line[512];
     char *p;
     uint8_t *q;
-    int len, val;
 
     printf("receive token:\n");
     q = buf;
@@ -211,7 +210,6 @@ client(int argc, char** argv)
 	{6, (void *)"\x2b\x06\x01\x05\x05\x02"};
     static gss_OID_desc ntlm_desc =
 	{10, (void *)"\x2b\x06\x01\x04\x01\x82\x37\x02\x02\x0a"};
-	
 
     mech = GSS_C_NO_OID;
     if (argc > 1) {

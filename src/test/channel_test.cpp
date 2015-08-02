@@ -159,6 +159,8 @@ public:
         auto bytes = ::recvfrom(
             sock_, buf_->buf(), buf_->bufferSize(), 0,
             reinterpret_cast<sockaddr*>(&addr_), &addrlen_);
+        if (bytes < 0)
+            throw system_error(errno, system_category());
         return buf_.get();
     }
 
@@ -580,7 +582,6 @@ TEST_F(ChannelTest, StreamAsyncTimeout)
     int sockpair[2];
     ASSERT_GE(::socketpair(AF_LOCAL, SOCK_STREAM, 0, sockpair), 0);
 
-    int ssock = sockpair[0];
     int clsock = sockpair[1];
 
     auto chan = make_shared<StreamChannel>(clsock);

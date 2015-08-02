@@ -66,35 +66,35 @@ void xdr(RefType<A, XDR> v, XDR* xdrs)
 
 TEST_F(XdrTest, BasicTypes)
 {
-    test<int, 4>(int(0x11223344), { 17, 34, 51, 68 });
-    test<unsigned int, 4>(int(0x11223344), { 17, 34, 51, 68 });
-    test<unsigned long, 8>(0x0102030411223344L, {1, 2, 3, 4, 17, 34, 51, 68});
-    test<long, 8>(0x0102030411223344L, {1, 2, 3, 4, 17, 34, 51, 68});
-    test<float, 4>(12345678.0, {75, 60, 97, 78});
-    test<double, 8>(12345678.0, {65, 103, 140, 41, 192, 0, 0, 0});
+    test<int, 4>(int(0x11223344), {{17, 34, 51, 68}});
+    test<unsigned int, 4>(int(0x11223344), {{17, 34, 51, 68}});
+    test<unsigned long, 8>(0x0102030411223344L, {{1, 2, 3, 4, 17, 34, 51, 68}});
+    test<long, 8>(0x0102030411223344L, {{1, 2, 3, 4, 17, 34, 51, 68}});
+    test<float, 4>(12345678.0, {{75, 60, 97, 78}});
+    test<double, 8>(12345678.0, {{65, 103, 140, 41, 192, 0, 0, 0}});
 }
 
 TEST_F(XdrTest, ByteArrays)
 {
-    test<array<uint8_t, 3>, 4>({1, 2, 3}, {1, 2, 3, 0});
-    test<vector<uint8_t>, 8>({1, 2, 3}, {0, 0, 0, 3, 1, 2, 3, 0});
-    test<string, 12>("hello", {0, 0, 0, 5, 104, 101, 108, 108, 111, 0, 0, 0});
+    test<array<uint8_t, 3>, 4>({{1, 2, 3}}, {{1, 2, 3, 0}});
+    test<vector<uint8_t>, 8>({1, 2, 3}, {{0, 0, 0, 3, 1, 2, 3, 0}});
+    test<string, 12>("hello", {{0, 0, 0, 5, 104, 101, 108, 108, 111, 0, 0, 0}});
 }
 
 TEST_F(XdrTest, PODArrays)
 {
-    test<array<A, 2>, 16>({A{1, 2}, A{3, 4}},
-        {0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4});
-    test<vector<A>, 20>({A{1, 2}, A{3, 4}},
-        {0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4});
+    test<array<A, 2>, 16>({{A{1, 2}, A{3, 4}}},
+        {{0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4}});
+    test<vector<A>, 20>({{A{1, 2}, A{3, 4}}},
+        {{0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4}});
 }
 
 TEST_F(XdrTest, Pointers)
 {
     unique_ptr<int> up(nullptr);
-    test<unique_ptr<int>, 4>(up, {0, 0, 0, 0});
+    test<unique_ptr<int>, 4>(up, {{0, 0, 0, 0}});
     up.reset(new int(4));
-    test<unique_ptr<int>, 8>(up, {0, 0, 0, 1, 0, 0, 0, 4});
+    test<unique_ptr<int>, 8>(up, {{0, 0, 0, 1, 0, 0, 0, 4}});
 }
 
 TEST_F(XdrTest, BoundedByteArray)
@@ -133,9 +133,9 @@ TEST_F(XdrTest, BoundedString)
 TEST_F(XdrTest, Sizeof)
 {
     EXPECT_EQ(4, XdrSizeof(42));
-    EXPECT_EQ(16, XdrSizeof(array<int, 4>{1, 2, 3, 4}));
+    EXPECT_EQ(16, XdrSizeof(array<int, 4>{{1, 2, 3, 4}}));
     EXPECT_EQ(20, XdrSizeof(vector<int>{1, 2, 3, 4}));
-    EXPECT_EQ(8, XdrSizeof(array<uint8_t, 7>{0}));
+    EXPECT_EQ(8, XdrSizeof(array<uint8_t, 7>{{0}}));
     EXPECT_EQ(12, XdrSizeof(string("Hello")));
 }
 

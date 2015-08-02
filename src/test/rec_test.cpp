@@ -65,7 +65,7 @@ TEST_F(RecTest, WriteFragments)
              {0, 0, 0, 4, 9, 10, 11, 12},
              {128, 0, 0, 4, 13, 14, 15, 16}};
     array<uint8_t, 16> ub =
-        {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+        {{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}};
     xdr(ub, xdrs.get());
     xdrs->pushRecord();
 }
@@ -92,7 +92,7 @@ TEST_F(RecTest, ReadFragments)
              {128, 0, 0, 4, 13, 14, 15, 16}};
     array<uint8_t, 16> b;
     xdr(b, xdrs.get());
-    array<uint8_t, 16> t{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    array<uint8_t, 16> t{{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}};
     EXPECT_EQ(b, t);
     xdrs->endRecord();
     EXPECT_EQ(queue.size(), 0);
@@ -109,7 +109,7 @@ TEST_F(RecTest, ReadUnalignedFragments)
     array<uint8_t, 16> b;
     std::fill(b.begin(), b.end(), 0);
     xdr(b, xdrs.get());
-    array<uint8_t, 16> t{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
+    array<uint8_t, 16> t{{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}};
     EXPECT_EQ(b, t);
     xdrs->endRecord();
     EXPECT_EQ(queue.size(), 0);
@@ -146,7 +146,7 @@ TEST_F(RecTest, ArrayPadding)
     array<uint8_t, 3> c;
     xdr(c, xdrs.get());
     xdrs->endRecord();
-    array<uint8_t, 3> tc{1, 2, 3};
+    array<uint8_t, 3> tc{{1, 2, 3}};
     EXPECT_EQ(c, tc);
 
     // Test skipRecord

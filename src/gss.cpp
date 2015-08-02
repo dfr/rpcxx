@@ -68,8 +68,8 @@ GssClient::GssClient(
       context_(GSS_C_NO_CONTEXT),
       cred_(GSS_C_NO_CREDENTIAL),
       principal_(GSS_C_NO_NAME),
-      established_(false),
       sequence_(1),
+      established_(false),
       defaultService_(service)
 {
     static gss_OID_desc krb5_desc =

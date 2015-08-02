@@ -581,10 +581,12 @@ public:
 
     void print(Indent indent, ostream& str) const override
     {
+#ifndef NDEBUG
         for (const auto& field: fields_) {
             // Throw an exception with line number etc
             assert(field.second.second->isPOD());
         }
+#endif
         str << indent << "struct {" << endl;
         printFields(indent + 1, str);
         str << indent << "}" << endl;

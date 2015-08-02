@@ -9,6 +9,7 @@ cc_library(
   ],
   includes = [
     "gen/include",
+    "gen/src",
     "upstream/src",
   ],
   copts = [
