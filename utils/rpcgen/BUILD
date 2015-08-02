@@ -2,7 +2,8 @@ cc_binary(
     name = "rpcgen",
     copts = ["-std=c++14"],
     srcs = ["rpcgen.cpp"],
-    deps = [":genlib"]
+    deps = [":genlib"],
+    visibility = ["//visibility:public"]
 )
 
 cc_library(
@@ -26,6 +27,6 @@ genrule(
     name = "test_client",
     srcs = ["test/test.x"],
     outs = ["test/test.h"],
-    cmd = "./rpcgen -txics $(SRCS) > $(OUTS)",
+    cmd = "$(location :rpcgen) -txics $(SRCS) > $(OUTS)",
     tools = [":rpcgen"]
 )
