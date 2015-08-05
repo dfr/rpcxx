@@ -68,7 +68,7 @@ struct UrlParser
         }
         else {
             int i = 0;
-            while (i < s.size() && s[0] != ':' && s[0] != '/')
+            while (i < s.size() && s[i] != ':' && s[i] != '/')
                 i++;
             host = s.substr(0, i);
             s = s.substr(i);
