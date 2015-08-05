@@ -2,7 +2,7 @@
 #include <cctype>
 #include <sstream>
 
-#include "utils/rpcgen/parser.h"
+#include "parser.h"
 
 using namespace oncrpc::rpcgen;
 using namespace std;
@@ -317,10 +317,20 @@ Parser::parseTypeSpecifier()
 
     case Token::KSTRUCT:
         nextToken();
+        if (tok_.type() == Token::IDENTIFIER) {
+            auto name = tok_.svalue();
+            nextToken();
+            return make_shared<NamedStructType>(name);
+        }
         return parseStructBody();
 
     case Token::KUNION:
         nextToken();
+        if (tok_.type() == Token::IDENTIFIER) {
+            auto name = tok_.svalue();
+            nextToken();
+            return make_shared<NamedUnionType>(name);
+        }
         return parseUnionBody();
 
     case Token::IDENTIFIER: {
@@ -400,9 +410,14 @@ Parser::parseDeclaration()
     }
     if (tok_.type() == '<') {
         nextToken();
-        auto size = parseValue();
+        if (tok_.type() == '>') {
+            type = make_shared<ArrayType>(move(type), nullptr, false);
+        }
+        else {
+            auto size = parseValue();
+            type = make_shared<ArrayType>(move(type), move(size), false);
+        }
         expectToken('>');
-        type = make_shared<ArrayType>(move(type), move(size), false);
     }
     return make_pair(move(name), move(type));
 }

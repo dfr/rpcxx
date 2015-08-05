@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "utils/rpcgen/utils.h"
+#include "utils.h"
 
 namespace oncrpc {
 namespace rpcgen {

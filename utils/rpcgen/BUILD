@@ -9,7 +9,8 @@ cc_binary(
 cc_library(
     name = "genlib",
     copts = ["-std=c++14"],
-    srcs = glob(["*.h", "*.cpp"], exclude=["rpcgen.cpp"])
+    srcs = glob(["*.h", "*.cpp"], exclude=["rpcgen.cpp"]),
+    includes = ["."]
 )
 
 cc_test(

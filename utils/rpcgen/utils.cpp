@@ -2,7 +2,7 @@
 #include <cstdlib>
 #include <sstream>
 
-#include "utils/rpcgen/utils.h"
+#include "utils.h"
 
 using namespace std;
 

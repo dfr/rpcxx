@@ -4,8 +4,8 @@
 
 #include <iostream>
 
-#include "utils/rpcgen/parser.h"
-#include "utils/rpcgen/utils.h"
+#include "parser.h"
+#include "utils.h"
 
 namespace oncrpc {
 namespace rpcgen {
@@ -34,6 +34,7 @@ public:
 
     void visit(TypeDefinition* def) override
     {
+        def->type()->forwardDeclarations(Indent(), str_);
         str_ << "typedef " << *def->type() << " " << def->name()
              << ";" << endl << endl;
     }
@@ -75,7 +76,7 @@ public:
     void visit(EnumDefinition* def) override
     {
         str_ << "template <typename XDR>" << endl
-             << "static void xdr("
+             << "static inline void xdr("
              << "oncrpc::RefType<" << def->name()
              << ", XDR> v, XDR* xdrs)" << endl
              << "{" << endl
@@ -87,7 +88,7 @@ public:
     void visit(StructDefinition* def) override
     {
         str_ << "template <typename XDR>" << endl
-             << "static void xdr("
+             << "static inline void xdr("
              << "oncrpc::RefType<" << def->name()
              << ", XDR> v, XDR* xdrs)" << endl
              << "{" << endl;
@@ -100,7 +101,7 @@ public:
     void visit(UnionDefinition* def) override
     {
         Indent indent;
-        str_ << "static void xdr(const "
+        str_ << "static inline void xdr(const "
              << def->name() << "& v, oncrpc::XdrSink* xdrs)" << endl
              << "{" << endl;
         ++indent;
@@ -117,7 +118,7 @@ public:
         --indent;
         str_ << "}" << endl << endl;
 
-        str_ << "static void xdr("
+        str_ << "static inline void xdr("
              << def->name() << "& v, oncrpc::XdrSource* xdrs)" << endl
              << "{" << endl;
         ++indent;
@@ -136,7 +137,6 @@ public:
             });
         --indent;
         str_ << "}" << endl << endl;
-
     }
 };
 

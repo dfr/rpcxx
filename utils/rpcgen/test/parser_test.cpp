@@ -57,7 +57,8 @@ TEST_F(ParserTest, EnumDefinition)
 
 TEST_F(ParserTest, StructDefinition)
 {
-    istringstream str("struct foo { int bar; unsigned int baz[2]; };");
+    istringstream str(
+        "struct foo { int bar; unsigned int baz[2]; int qux<>; };");
     EXPECT_EQ(
         Specification(
             make_shared<StructDefinition>(
@@ -71,7 +72,13 @@ TEST_F(ParserTest, StructDefinition)
                         make_shared<ArrayType>(
                             Parser::intType(32, false),
                             make_shared<ConstantValue>(2),
-                            true))))),
+                            true)),
+                    make_pair(
+                        "qux",
+                        make_shared<ArrayType>(
+                            Parser::intType(32, true),
+                            nullptr,
+                            false))))),
         *Parser(str, cerr).parse().get());
 }
 
@@ -108,6 +115,22 @@ TEST_F(ParserTest, UnionDefinition)
                             "baz",
                             Parser::intType(32, true)))))),
         *Parser(str, cerr).parse().get());
+}
+
+TEST_F(ParserTest, ForwardDecl)
+{
+    istringstream str("typedef struct foo bar;");
+    EXPECT_EQ(
+        Specification(
+            make_shared<TypeDefinition>(
+                make_pair(
+                    "bar",
+                    make_shared<NamedType>("foo")
+                )
+            )
+        ),
+        *Parser(str, cerr).parse().get()
+    );
 }
 
 TEST_F(ParserTest, ProgramDefinition)

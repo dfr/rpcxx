@@ -5,9 +5,9 @@
 
 #include <unistd.h>
 
-#include "utils/rpcgen/generate.h"
-#include "utils/rpcgen/parser.h"
-#include "utils/rpcgen/utils.h"
+#include "generate.h"
+#include "parser.h"
+#include "utils.h"
 
 using namespace oncrpc::rpcgen;
 using namespace std;
@@ -75,6 +75,12 @@ main(int argc, char* const argv[])
     if (argc != 1)
         usage();
     ifstream file(argv[0]);
+    if (!file.is_open()) {
+        error_code ec(errno, system_category());
+        cerr << "rpcgen: " << argv[0] << ": " << ec.message() << endl;
+        return 1;
+    }
+
     ostream& str = cout;
 
     Parser parser(argv[0], file, str);
@@ -92,6 +98,9 @@ main(int argc, char* const argv[])
         if (generateClient) {
             str << "#include <rpc++/channel.h>" << endl;
             str << "#include <rpc++/client.h>" << endl;
+        }
+        if (generateServer) {
+            str << "#include <rpc++/server.h>" << endl;
         }
 
         for (const auto& ns: namespaces)

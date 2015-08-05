@@ -2,8 +2,8 @@
 
 #include <string>
 
-#include "utils/rpcgen/utils.h"
-#include "utils/rpcgen/values.h"
+#include "utils.h"
+#include "values.h"
 
 namespace oncrpc {
 namespace rpcgen {
@@ -17,6 +17,7 @@ public:
     virtual bool isPOD() const = 0;
     virtual bool isVoid() const { return false; }
     virtual void print(Indent indent, ostream& str) const = 0;
+    virtual void forwardDeclarations(Indent indent, ostream& str) const {}
 
     string name() const
     {
@@ -65,8 +66,48 @@ public:
         return false;
     }
 
-private:
+protected:
     string name_;
+};
+
+class NamedStructType: public NamedType
+{
+public:
+    NamedStructType(const string& name)
+        : NamedType(name)
+    {
+    }
+
+    bool isPOD() const override
+    {
+        // ideally, we look up the type
+        return false;
+    }
+
+    void forwardDeclarations(Indent indent, ostream& str) const override
+    {
+        str << indent << "struct " << name_ << ";" << endl;
+    }
+};
+
+class NamedUnionType: public NamedType
+{
+public:
+    NamedUnionType(const string& name)
+        : NamedType(name)
+    {
+    }
+
+    bool isPOD() const override
+    {
+        // ideally, we look up the type
+        return false;
+    }
+
+    void forwardDeclarations(Indent indent, ostream& str) const override
+    {
+        str << indent << "union " << name_ << ";" << endl;
+    }
 };
 
 class VoidType: public Type
@@ -116,6 +157,11 @@ public:
     void print(Indent indent, ostream& str) const override
     {
         str << "std::unique_ptr<" << *type_ << ">";
+    }
+
+    void forwardDeclarations(Indent indent, ostream& str) const override
+    {
+        type_->forwardDeclarations(indent, str);
     }
 
     int operator==(const Type& other) const override
@@ -332,17 +378,29 @@ public:
     {
         if (isFixed_)
             str << "std::array<" << *type_ << ", " << *size_ << ">";
-        else
+        else if (size_)
             str << "oncrpc::bounded_vector<" << *type_ << ", " << *size_ << ">";
+        else
+            str << "std::vector<" << *type_ << ">";
     }
 
     int operator==(const Type& other) const override
     {
         auto p = dynamic_cast<const ArrayType*>(&other);
-        if (p)
+        if (p) {
+            if (*type_ != *p->type_)
+                return false;
+            if (size_) {
+                if (*size_ != *p->size_)
+                    return false;
+            }
+            else {
+                if (p->size_)
+                    return false;
+            }
             return *type_ == *p->type_ &&
-                *size_ == *p->size_ &&
                 isFixed_ == p->isFixed_;
+        }
         return false;
     }
 
@@ -588,8 +646,59 @@ public:
         }
 #endif
         str << indent << "struct {" << endl;
-        printFields(indent + 1, str);
+        printFields(indent + 1, "", str);
         str << indent << "}" << endl;
+    }
+
+    void printFields(Indent indent, const string& name, ostream& str) const
+    {
+        // Default constructor
+        str << indent << name << "() {}" << endl;
+
+        // Move constructor
+        str << indent << name << "(" << name << "&& other) {" << endl;
+        ++indent;
+        str << indent << discriminant_.first
+            << " = other." << discriminant_.first << ";" << endl;
+        printSwitch(
+            indent, str, "",
+            [&str](Indent indent, auto name, auto type)
+            {
+                if (name.size() == 0)
+                    return;
+                str << indent << "new(&_storage) "
+                    << *type << "(std::move(other." << name << "()));" << endl;
+            });
+        str << indent << "_hasValue = true;" << endl;
+        str << indent << "other._clear();" << endl;
+        --indent;
+        str << indent << "}" << endl;
+
+        // Destructor
+        str << indent << "~" << name << "() { _clear(); }" << endl;
+
+        // Move assignment
+        str << indent << name << "& operator=("
+            << name << "&& other) {" << endl;
+        ++indent;
+        str << indent << "_clear();" << endl;
+        str << indent << discriminant_.first
+            << " = other." << discriminant_.first << ";" << endl;
+        printSwitch(
+            indent, str, "",
+            [&str](Indent indent, auto name, auto type)
+            {
+                if (name.size() == 0)
+                    return;
+                str << indent << "new(&_storage) "
+                    << *type << "(std::move(other." << name << "()));" << endl;
+            });
+        str << indent << "_hasValue = true;" << endl;
+        str << indent << "other._clear();" << endl;
+        str << indent << "return *this;" << endl;
+        --indent;
+        str << indent << "}" << endl;
+        printFields(indent, str);
     }
 
     void printFields(Indent indent, ostream& str) const
@@ -629,8 +738,8 @@ public:
             field.second.second->print(indent + 4, str);
         }
         --indent;
-        str << "> _storage;" << endl;
-        str << indent << "bool _hasValue;" << endl;
+        str << ">::type _storage;" << endl;
+        str << indent << "bool _hasValue = false;" << endl;
 
         printAccessors(indent, str, false);
         printAccessors(indent, str, true);
@@ -644,6 +753,8 @@ public:
             [&str](Indent indent, auto name, auto type)
             {
                 if (name.size() == 0)
+                    return;
+                if (type->isPOD())
                     return;
                 str << indent << "reinterpret_cast<"
                     << *type << "*>(&_storage)->~"

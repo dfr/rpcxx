@@ -11,9 +11,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "utils/rpcgen/lexer.h"
-#include "utils/rpcgen/types.h"
-#include "utils/rpcgen/utils.h"
+#include "lexer.h"
+#include "types.h"
+#include "utils.h"
 
 namespace oncrpc {
 namespace rpcgen {
@@ -162,8 +162,7 @@ public:
         str << indent
             << "struct " << name_ << " {" << endl;
         ++indent;
-        body_->printFields(indent, str);
-        str << indent << "~" << name_ << "() { _clear(); }" << endl;
+        body_->printFields(indent, name_, str);
         --indent;
         str << indent << "};" << endl;
     }

@@ -1,4 +1,4 @@
-#include "utils/rpcgen/parser.h"
+#include "parser.h"
 
 using namespace oncrpc::rpcgen;
 
@@ -225,7 +225,7 @@ void ProgramVersion::printServerStubs(
         i = 0;
         str << indent;
         if (!proc->retType()->isVoid()) {
-            str << "_ret = ";
+            str << "_ret = std::move(";
         }
         str << proc->methodName(prefixlen) << "(";
         for (auto argType: *proc) {
@@ -234,6 +234,9 @@ void ProgramVersion::printServerStubs(
                 str << "std::move(_arg" << i << ")";
                 i++;
             }
+        }
+        if (!proc->retType()->isVoid()) {
+            str << ")";
         }
         str << ");" << endl;
         if (!proc->retType()->isVoid()) {

@@ -37,6 +37,11 @@ public:
     {
         return val;
     }
+
+    foolist list() override
+    {
+        return nullptr;
+    }
 };
 
 TEST_F(ServerTest, Call)

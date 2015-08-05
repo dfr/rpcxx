@@ -4,7 +4,7 @@
 #include <sstream>
 #include <unordered_map>
 
-#include "utils/rpcgen/lexer.h"
+#include "lexer.h"
 
 using namespace oncrpc::rpcgen;
 using namespace std;
