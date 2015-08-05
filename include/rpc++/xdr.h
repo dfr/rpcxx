@@ -23,13 +23,18 @@ using std::uint64_t;
 template <size_t N>
 class bounded_string: public std::string
 {
+public:
+    bounded_string() {}
+    bounded_string(const char* s) : std::string(s) {}
+    bounded_string(std::string& s) : std::string(s) {}
+    bounded_string(const bounded_string& other) : std::string(other) {}
 };
 
 template <typename T, size_t N>
 class bounded_vector: public std::vector<T>
 {
 public:
-    bounded_vector() {}
+    bounded_vector() : std::vector<T>() {}
     bounded_vector(const bounded_vector& other) : std::vector<T>(other) {}
     bounded_vector(std::initializer_list<T> init)
         : std::vector<T>(init) {}
