@@ -5,7 +5,7 @@ cc_library(
   name = "glog",
   deps = [
     #"//third_party/libunwind:libunwind-k8",
-    #"//third_party/gflags:gflags",
+    "//third_party/gflags:gflags",
   ],
   includes = [
     "gen/include",
