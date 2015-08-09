@@ -705,8 +705,11 @@ public:
     {
         str << indent;
         discriminant_.second->print(indent, str);
-        str << " " << discriminant_.first << ";" << endl
-            << indent << "union _u {" << endl;
+        str << " " << discriminant_.first << ";" << endl;
+        str << indent << "void set_" << discriminant_.first << "(";
+        discriminant_.second->print(indent, str);
+        str << " _v) { _setType(_v); }" << endl;
+        str << indent << "union _u {" << endl;
         ++indent;
         for (const auto& field: fields_) {
             if (field.first.size() > 0) {
