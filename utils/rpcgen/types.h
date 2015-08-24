@@ -650,6 +650,32 @@ public:
         str << indent << "}" << endl;
     }
 
+    void checkDiscriminant(
+        Indent indent, const ValueList& values, ostream& str) const
+    {
+        str << indent << "assert(";
+        bool first = true;
+        if (values.size() > 0) {
+            for (const auto& val: values) {
+                if (!first)
+                    str << " || ";
+                str << discriminant_.first << " == " << *val;
+                first = false;
+            }
+        }
+        else {
+            // If there are no values we must check that the discriminant is
+            // not any of the other field values
+            for (const auto& val: values_) {
+                if (!first)
+                    str << " && ";
+                str << discriminant_.first << " != " << *val;
+                first = false;
+            }
+        }
+        str << ");" << endl;
+    }
+
     void printFields(Indent indent, const string& name, ostream& str) const
     {
         // Default constructor
@@ -660,6 +686,7 @@ public:
         ++indent;
         str << indent << discriminant_.first
             << " = other." << discriminant_.first << ";" << endl;
+        str << indent << "if (!other._hasValue) return;" << endl;
         printSwitch(
             indent, str, "",
             [&str](Indent indent, auto name, auto type)
@@ -673,6 +700,37 @@ public:
         str << indent << "other._clear();" << endl;
         --indent;
         str << indent << "}" << endl;
+
+        // Type-specific constructors
+        for (const auto& field: fields_) {
+            if (field.second.first.size() == 0) {
+                // For void valued fields, just save the discriminant
+                str << indent << name << "(" << *discriminant_.second
+                    << " _discriminant)" << endl;
+                ++indent;
+                str << indent << ": " << discriminant_.first
+                    << "(_discriminant) {" << endl;
+                checkDiscriminant(indent, field.first, str);
+                str << indent << "_hasValue = true;" << endl;
+                --indent;
+                str << indent << "}" << endl;
+            }
+            else {
+                str << indent << name << "(" << *discriminant_.second
+                    << " _discriminant, "
+                    << *field.second.second << "&& _value)" << endl;
+                ++indent;
+                str << indent << ": " << discriminant_.first
+                    << "(_discriminant) {" << endl;
+                checkDiscriminant(indent, field.first, str);
+                str << indent << "new (&_storage) "
+                    << *field.second.second << "(std::move(_value));" << endl;
+                str << indent << "_hasValue = true;" << endl;
+                --indent;
+                str << indent << "}" << endl;
+
+            }
+        }
 
         // Destructor
         str << indent << "~" << name << "() { _clear(); }" << endl;
@@ -799,26 +857,8 @@ public:
             field.second.second->print(indent, str);
             str << "& " << field.second.first << "() " << attr << "{" << endl;
             ++indent;
-            str << indent << "assert(_hasValue";
-            if (field.first.size() > 0) {
-                str << " && (";
-                bool firstValue = true;
-                for (const auto& val: field.first) {
-                    if (firstValue) {
-                        firstValue = false;
-                    }
-                    else {
-                        str << " || ";
-                    }
-                    str << discriminant_.first << " == " << *val;
-                }
-                str << ")";
-            }
-            else {
-                for (const auto& val: values_)
-                    str << " && " << discriminant_.first << " != " << *val;
-            }
-            str << ");" << endl;
+            str << indent << "assert(_hasValue);" << endl;
+            checkDiscriminant(indent, field.first, str);
             str << indent << "return *reinterpret_cast<" << attr;
             field.second.second->print(indent, str);
             str << "*>(&_storage);" << endl;

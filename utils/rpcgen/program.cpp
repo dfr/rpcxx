@@ -31,7 +31,7 @@ void Procedure::printDeclaration(
     for (const auto& argType: *this) {
         if (argType->isVoid())
             continue;
-        str << sep << *argType << "&& _arg" << i;
+        str << sep << "const " << *argType << "& _arg" << i;
         sep = ", ";
         i++;
     }
