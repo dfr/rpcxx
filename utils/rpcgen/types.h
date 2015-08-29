@@ -576,6 +576,12 @@ public:
         add(move(args)...);
     }
 
+    ValueList& operator=(ValueList&& other)
+    {
+        values_ = move(other.values_);
+        return *this;
+    }
+
     void add(shared_ptr<Value>&& v)
     {
         values_.emplace_back(move(v));
@@ -615,7 +621,16 @@ private:
     vector<shared_ptr<Value>> values_;
 };
 
-typedef pair<ValueList, Declaration> UnionArm;
+struct UnionArm
+{
+    UnionArm(ValueList&& values, Declaration&& decl)
+        : values_(move(values)), decl_(move(decl))
+    {
+    }
+
+    ValueList values_;
+    Declaration decl_;
+};
 
 class UnionType: public Type
 {
@@ -642,7 +657,7 @@ public:
 #ifndef NDEBUG
         for (const auto& field: fields_) {
             // Throw an exception with line number etc
-            assert(field.second.second->isPOD());
+            assert(field.decl_.second->isPOD());
         }
 #endif
         str << indent << "struct {" << endl;
@@ -703,14 +718,14 @@ public:
 
         // Type-specific constructors
         for (const auto& field: fields_) {
-            if (field.second.first.size() == 0) {
+            if (field.decl_.first.size() == 0) {
                 // For void valued fields, just save the discriminant
                 str << indent << name << "(" << *discriminant_.second
                     << " _discriminant)" << endl;
                 ++indent;
                 str << indent << ": " << discriminant_.first
                     << "(_discriminant) {" << endl;
-                checkDiscriminant(indent, field.first, str);
+                checkDiscriminant(indent, field.values_, str);
                 str << indent << "_hasValue = true;" << endl;
                 --indent;
                 str << indent << "}" << endl;
@@ -718,13 +733,13 @@ public:
             else {
                 str << indent << name << "(" << *discriminant_.second
                     << " _discriminant, "
-                    << *field.second.second << "&& _value)" << endl;
+                    << *field.decl_.second << "&& _value)" << endl;
                 ++indent;
                 str << indent << ": " << discriminant_.first
                     << "(_discriminant) {" << endl;
-                checkDiscriminant(indent, field.first, str);
+                checkDiscriminant(indent, field.values_, str);
                 str << indent << "new (&_storage) "
-                    << *field.second.second << "(std::move(_value));" << endl;
+                    << *field.decl_.second << "(std::move(_value));" << endl;
                 str << indent << "_hasValue = true;" << endl;
                 --indent;
                 str << indent << "}" << endl;
@@ -770,8 +785,8 @@ public:
         str << indent << "union _u {" << endl;
         ++indent;
         for (const auto& field: fields_) {
-            if (field.first.size() > 0) {
-                for (const auto& val: field.first) {
+            if (field.values_.size() > 0) {
+                for (const auto& val: field.values_) {
                     str << indent
                         << "// case " << *val << ":" << endl;
                 }
@@ -781,10 +796,10 @@ public:
                     << "// default:" << endl;
             }
             // If we have no name, its a void field so ignore it
-            if (field.second.first.size() > 0) {
+            if (field.decl_.first.size() > 0) {
                 str << indent;
-                field.second.second->print(indent + 4, str);
-                str << " " << field.second.first << ";" << endl;
+                field.decl_.second->print(indent + 4, str);
+                str << " " << field.decl_.first << ";" << endl;
             }
         }
         --indent;
@@ -793,10 +808,10 @@ public:
         ++indent;
         str << indent << "sizeof(_u)";
         for (const auto& field: fields_) {
-            if (field.second.first.size() == 0)
+            if (field.decl_.first.size() == 0)
                 continue;
             str << "," << endl << indent;
-            field.second.second->print(indent + 4, str);
+            field.decl_.second->print(indent + 4, str);
         }
         --indent;
         str << ">::type _storage;" << endl;
@@ -851,16 +866,16 @@ public:
         if (isConst)
             attr = "const ";
         for (const auto& field: fields_) {
-            if (field.second.first.size() == 0)
+            if (field.decl_.first.size() == 0)
                 continue;
             str << indent << attr;
-            field.second.second->print(indent, str);
-            str << "& " << field.second.first << "() " << attr << "{" << endl;
+            field.decl_.second->print(indent, str);
+            str << "& " << field.decl_.first << "() " << attr << "{" << endl;
             ++indent;
             str << indent << "assert(_hasValue);" << endl;
-            checkDiscriminant(indent, field.first, str);
+            checkDiscriminant(indent, field.values_, str);
             str << indent << "return *reinterpret_cast<" << attr;
-            field.second.second->print(indent, str);
+            field.decl_.second->print(indent, str);
             str << "*>(&_storage);" << endl;
             --indent;
             str << indent << "}" << endl;
@@ -874,8 +889,8 @@ public:
         str << indent << "switch (" << prefix
             << discriminant_.first << ") {" << endl;
         for (const auto& field: fields_) {
-            if (field.first.size() > 0) {
-                for (const auto& val: field.first) {
+            if (field.values_.size() > 0) {
+                for (const auto& val: field.values_) {
                     str << indent << "case " << *val << ":" << endl;
                 }
             }
@@ -883,7 +898,7 @@ public:
                 str << indent << "default:" << endl;
             }
             ++indent;
-            fn(indent, field.second.first, field.second.second);
+            fn(indent, field.decl_.first, field.decl_.second);
             str << indent << "break;" << endl;
             --indent;
         }
@@ -897,11 +912,11 @@ public:
             return false;
         for (auto i = fields_.begin(), j = p->fields_.begin();
              i != fields_.end(); ++i, ++j) {
-            if (i->first != j->first)
+            if (i->values_ != j->values_)
                 return false;
-            if (i->second.first != j->second.first)
+            if (i->decl_.first != j->decl_.first)
                 return false;
-            if (*i->second.second != *j->second.second)
+            if (*i->decl_.second != *j->decl_.second)
                 return false;
         }
         return true;
@@ -916,7 +931,7 @@ public:
 
     void add(UnionArm&& field)
     {
-        for (const auto& v: field.first)
+        for (const auto& v: field.values_)
             values_.push_back(v);
         fields_.emplace_back(move(field));
     }

@@ -253,13 +253,13 @@ Parser::parseUnionBody()
             values.add(parseValue());
             expectToken(':');
         } while (tok_.type() == Token::KCASE);
-        res->add(make_pair(move(values), parseDeclaration()));
+        res->add(UnionArm(move(values), parseDeclaration()));
         expectToken(';');
     } while (tok_.type() == Token::KCASE);
     if (tok_.type() == Token::KDEFAULT) {
         nextToken();
         expectToken(':');
-        res->add(make_pair(ValueList(), parseDeclaration()));
+        res->add(UnionArm(ValueList(), parseDeclaration()));
         expectToken(';');
     }
     expectToken('}');

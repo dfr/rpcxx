@@ -437,6 +437,8 @@ inline void xdr(long& v, XdrSource* xdrs)
     xdr(reinterpret_cast<uint64_t&>(v), xdrs);
 }
 
+// On FreeBSD, uint64_t and unsigned long are the same type
+#ifndef __FreeBSD__
 inline void xdr(const unsigned long v, XdrSink* xdrs)
 {
     xdr(reinterpret_cast<const uint64_t&>(v), xdrs);
@@ -446,6 +448,7 @@ inline void xdr(unsigned long& v, XdrSource* xdrs)
 {
     xdr(reinterpret_cast<uint64_t&>(v), xdrs);
 }
+#endif
 
 inline void xdr(const float v, XdrSink* xdrs)
 {

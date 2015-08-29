@@ -3,6 +3,10 @@ cc_binary(
     copts = ["-std=c++14"],
     srcs = ["rpcgen.cpp"],
     deps = [":genlib"],
+    linkopts = select({
+        ":freebsd": ["-lm"],
+        ":darwin": [],
+    }),
     visibility = ["//visibility:public"]
 )
 
@@ -21,6 +25,10 @@ cc_test(
     deps = [":genlib",
             "//:rpcxx",
             "//third_party/gtest:gtest_main"],
+    linkopts = select({
+        ":freebsd": ["-lm"],
+        ":darwin": [],
+    }),
     linkstatic = 1
 )
 
@@ -30,4 +38,16 @@ genrule(
     outs = ["test/test.h"],
     cmd = "$(location :rpcgen) -txics $(SRCS) > $(OUTS)",
     tools = [":rpcgen"]
+)
+
+config_setting(
+    name = "darwin",
+    values = {"cpu": "darwin"},
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "freebsd",
+    values = {"cpu": "freebsd"},
+    visibility = ["//visibility:public"],
 )

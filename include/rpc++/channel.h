@@ -117,6 +117,12 @@ protected:
         int gen, std::function<void(XdrSource*)> xresults);
 
     struct Transaction {
+        enum {
+            SEND,       // sending message
+            AUTH,       // possibly asleep performing authentication
+            REPLY,      // waiting for some reply message
+            SLEEPING    // sleeping in Channel::call waiting for reply
+        } state = SEND;
         uint32_t xid = 0;
         uint32_t seq = 0;
         bool sleeping = false;

@@ -100,16 +100,16 @@ TEST_F(ParserTest, UnionDefinition)
                 make_shared<UnionType>(
                     make_pair(
                         "i", Parser::intType(32, true)),
-                    make_pair(
+                    UnionArm(
                         ValueList(move(make_shared<ConstantValue>(0)),
                                   move(make_shared<ConstantValue>(1))),
                         make_pair(
                             "foo", Parser::intType(32, true))),
-                    make_pair(
+                    UnionArm(
                         ValueList(make_shared<VariableValue>("x")),
                         make_pair(
                             "bar", Parser::intType(64, true))),
-                    make_pair(
+                    UnionArm(
                         ValueList{},
                         make_pair(
                             "baz",

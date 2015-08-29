@@ -154,6 +154,7 @@ Channel::callAsync(
     if (tman_) {
         // XXX: Should attempt to support retransmits here
         tx.tid = tman_->add(maxTime, [=]() {
+            std::unique_lock<std::mutex> lock(mutex_);
             pending_.erase(xid);
             txp->continuation();
             delete txp;
@@ -176,8 +177,9 @@ Channel::callAsync(
     pending_.emplace(xid, txp);
     lock.unlock();
 
+    auto res = tx.continuation.get_future();
     sendMessage(std::move(xdrout));
-    return tx.continuation.get_future();
+    return res;
 }
 
 void
@@ -199,14 +201,18 @@ Channel::call(
 
     std::unique_lock<std::mutex> lock(mutex_);
     for (;;) {
+        if (!tx.xid) {
+            xid = tx.xid = xid_++;
+            pending_.emplace(xid, &tx);
+            VLOG(3) << "assigning new xid: " << tx.xid;
+        }
+
+        tx.state = Transaction::AUTH;
+        VLOG(3) << "xid: " << xid << ": validating auth";
         lock.unlock();
         int gen = client->validateAuth(this);
         lock.lock();
-
-        if (!tx.xid) {
-            xid = tx.xid = xid_++;
-            VLOG(3) << "assigning new xid: " << tx.xid;
-        }
+        tx.state = Transaction::SEND;
 
         // Drop the lock while we transmit
         lock.unlock();
@@ -218,7 +224,6 @@ Channel::call(
         }
         sendMessage(std::move(xdrout));
         lock.lock();
-        pending_.emplace(xid, &tx);
 
         // XXX support oneway
 
@@ -229,6 +234,7 @@ Channel::call(
         // Loop waiting for replies until we either get a matching
         // reply message or we time out
         for (;;) {
+            tx.state = Transaction::REPLY;
             now = clock_type::now();
             assert(lock);
             if (!tx.body) {
@@ -242,9 +248,9 @@ Channel::call(
                     // us or until we time out.
                     VLOG(3) << "xid: " << xid << ": waiting for other thread: "
                             << toMilliseconds(timeoutDuration) << "ms";
-                    tx.sleeping = true;
+                    tx.state = Transaction::SLEEPING;
                     tx.cv.wait_for(lock, timeoutDuration);
-                    tx.sleeping = false;
+                    tx.state = Transaction::REPLY;
                 }
                 else {
                     running_ = true;
@@ -278,34 +284,56 @@ Channel::call(
             continue;
         }
 
-        assert(tx.reply.xid == xid);
         VLOG(3) << "xid: " << xid << ": reply received";
+        assert(tx.reply.xid == xid);
+        tx.reply.xid = 0;
+        tx.xid = 0;
 
         // If we have any pending transactions, make sure that at least
         // one thread is awake to read replies.
         if (pending_.size() > 0) {
-            VLOG(4) << pending_.size() << " transactions pending";
+            VLOG(3) << pending_.size() << " transactions pending";
             int liveThreads = 0;
+            Transaction* toWake = nullptr;
             for (auto& i: pending_) {
-                if (!i.second->sleeping) {
-                    VLOG(4) << "xid: " << i.first << " is awake";
+                switch (i.second->state) {
+                case Transaction::SEND:
+                    break;
+                case Transaction::AUTH:
+                    break;
+                case Transaction::REPLY:
                     liveThreads++;
-                }
-                else {
-                    VLOG(4) << "xid: " << i.first << " is sleeping";
+                    break;
+                case Transaction::SLEEPING:
+                    toWake = i.second;
+                    break;
                 }
             }
             if (liveThreads == 0) {
-                auto i = pending_.begin();
-                VLOG(3) << "waking thread for " << "xid: " << i->first;
-                i->second->cv.notify_one();
+                if (!toWake) {
+                    // If there are no sleeping threads, then all the pending
+                    // transactions must be in auth state. Exactly one of
+                    // those threads must be performing the auth while the
+                    // rest sleep. Since no non-auth transactions can be
+                    // in-flight and we have just completed a transaction,
+                    // it must be true that this thread is the auth performer
+                    // which means that we also own one of the transactions
+                    // in AUTH state - if we just return, that transaction
+                    // will move back to AWAKE state and we can continue to
+                    // make forward progress.
+                }
+                else {
+                    VLOG(3) << "waking thread for " << "xid: " << toWake->xid;
+                    toWake->cv.notify_one();
+                }
             }
         }
 
         lock.unlock();
         if (processReply(client, proc, tx, prot, gen, xresults))
-            return;
+            break;
         lock.lock();
+        tx.body.reset();
     }
 }
 
@@ -359,6 +387,7 @@ bool Channel::processIncomingMessage(
         // This may be some other thread's reply. Find them and
         // wake them up to process it
         VLOG(3) << "xid: " << msg.xid << ": finding transaction";
+        assert(lock);
         auto i = pending_.find(msg.xid);
         if (i != pending_.end()) {
             auto& other = *i->second;

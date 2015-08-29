@@ -101,13 +101,21 @@
 #define HAVE_SYS_TYPES_H 1
 
 /* Define to 1 if you have the <sys/ucontext.h> header file. */
+#ifdef __FreeBSD__
+/* #undef HAVE_SYS_UCONTEXT_H */
+#else
 #define HAVE_SYS_UCONTEXT_H 1
+#endif
 
 /* Define to 1 if you have the <sys/utsname.h> header file. */
 #define HAVE_SYS_UTSNAME_H 1
 
 /* Define to 1 if you have the <ucontext.h> header file. */
+#ifdef __FreeBSD__
+#define HAVE_UCONTEXT_H 1
+#else
 /* #undef HAVE_UCONTEXT_H */
+#endif
 
 /* Define to 1 if you have the <unistd.h> header file. */
 #define HAVE_UNISTD_H 1
@@ -153,7 +161,12 @@
 #define PACKAGE_VERSION "0.3.4"
 
 /* How to access the PC from a struct ucontext */
+#ifdef __APPLE__
 #define PC_FROM_UCONTEXT uc_mcontext->__ss.__rip
+#endif
+#ifdef __FreeBSD__
+#define PC_FROM_UCONTEXT uc_mcontext.mc_rip
+#endif
 
 /* Define to necessary symbol if this constant uses a non-standard name on
    your system. */

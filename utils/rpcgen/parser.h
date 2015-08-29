@@ -122,7 +122,7 @@ public:
     {
     }
 
-    void print(Indent indent, ostream& str)
+    void print(Indent indent, ostream& str) override
     {
         str << indent << "struct " << name_ << " {" << endl;
         body_->printFields(indent + 1, str);

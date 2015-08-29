@@ -13,7 +13,8 @@ cc_library(
     "upstream/src",
   ],
   copts = [
-    "-DNO_FRAME_POINTER",
+    #"-DNO_FRAME_POINTER",
+    "-D_GNU_SOURCE",
     #"-fno-sanitize=thread",
     #"-fno-sanitize=address",
     "-Ithird_party/glog/gen/src",

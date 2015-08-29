@@ -169,11 +169,11 @@ Address::Address(const std::string& url)
         hints.ai_family = PF_UNSPEC;
         if (std::isdigit(p.host[0])) {
             hints.ai_flags = AI_NUMERICHOST;
-            hints.ai_flags = PF_INET;
+            hints.ai_family = PF_INET;
         }
         else if (p.host[0] == '[') {
             hints.ai_flags = AI_NUMERICHOST;
-            hints.ai_flags = PF_INET6;
+            hints.ai_family = PF_INET6;
             host = host.substr(1, host.size() - 2);
         }
         hints.ai_socktype = p.scheme == "tcp" ? SOCK_STREAM : SOCK_DGRAM;

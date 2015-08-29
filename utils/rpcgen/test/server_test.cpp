@@ -33,7 +33,7 @@ public:
     {
     }
 
-    int32_t echo(int32_t&& val) override
+    int32_t echo(const int32_t& val) override
     {
         return val;
     }

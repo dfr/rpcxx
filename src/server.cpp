@@ -24,6 +24,7 @@ SequenceWindow::update(uint32_t seq)
 {
     if (seq > largestSeen_) {
         uint32_t minSeq = seq > size_ - 1 ? seq - size_ + 1 : 0;
+        VLOG(3) << "update sequence window: " << seq << " min: " << minSeq;
         while (valid_.size() > 0 && valid_.front() < minSeq)
             valid_.pop_front();
         for (uint32_t i = std::max(minSeq, largestSeen_ + 1); i <= seq; i++)
@@ -35,9 +36,13 @@ SequenceWindow::update(uint32_t seq)
 void
 SequenceWindow::reset(uint32_t seq)
 {
+    // Note: its harmless if our sequence is no longer in the window -
+    // some other thread may have called SequenceWindow::update and
+    // advanced past us.
+    VLOG(3) << "reset sequence window: " << seq;
     auto i = std::find(valid_.begin(), valid_.end(), seq);
-    assert(i != valid_.end());
-    valid_.erase(i);
+    if (i != valid_.end())
+	valid_.erase(i);
 }
 
 bool
@@ -158,8 +163,10 @@ GssClientContext::verifyCall(CallContext& ctx)
     std::unique_lock<std::mutex> lock(mutex_);
     uint32_t seq = ctx.gsscred().sequence;
     sequenceWindow_.update(seq);
-    if (!sequenceWindow_.valid(seq))
+    if (!sequenceWindow_.valid(seq)) {
+	VLOG(2) << "out of sequence window xid: " << ctx.msg().xid;
         return false;
+    }
 
     return true;
 }

@@ -11,6 +11,8 @@ namespace _detail {
 reportError(gss_OID mech, uint32_t maj, uint32_t min)
 {
     VLOG(2) << "reporting GSS-API error, major=" << maj << ", min=" << min;
+
+#ifdef __APPLE__
     {
         CFErrorRef err = GSSCreateError(mech, maj, min);
         CFStringRef str = CFErrorCopyDescription(err);
@@ -18,6 +20,7 @@ reportError(gss_OID mech, uint32_t maj, uint32_t min)
         CFStringGetCString(str, buf, 512, kCFStringEncodingUTF8);
         VLOG(2) << buf;
     }
+#endif
 
     uint32_t maj_stat, min_stat;
     uint32_t message_context;

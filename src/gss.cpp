@@ -277,8 +277,6 @@ GssClient::processCall(
     }
     calllen = xdrcall.writePos();
 
-    lock.unlock();
-
     xdrs->putBytes(callbuf, calllen);
     // Create a mic of the RPC header and cred
     uint32_t maj_stat, min_stat;
@@ -286,6 +284,7 @@ GssClient::processCall(
     gss_buffer_desc buf{ calllen, callbuf };
     maj_stat = gss_get_mic(
         &min_stat, context_, GSS_C_QOP_DEFAULT, &buf, &mic);
+    lock.unlock();
     if (GSS_ERROR(maj_stat)) {
         reportError(mech_, maj_stat, min_stat);
     }
