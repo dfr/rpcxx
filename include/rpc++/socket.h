@@ -164,7 +164,7 @@ public:
 
     /// Called from SocketManager::run when the socket is readable. Return
     /// true if the socket is still active or false if it should be closed
-    virtual bool onReadable(SocketManager* sockman) = 0;
+    virtual bool onReadable(SocketManager* sockman) {}
 
     /// Bind the local address
     virtual void bind(const Address& addr)

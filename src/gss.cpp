@@ -92,6 +92,39 @@ GssClient::GssClient(
     }
 }
 
+GssClient::GssClient(uint32_t program, uint32_t version,
+        const std::string& initiator,
+        const std::string& principal,
+        const std::string& mechanism,
+        GssService service)
+    : GssClient(program, version, principal, mechanism, service)
+{
+    // Get the GSS-API name for the initiator
+    uint32_t maj_stat, min_stat;
+    gss_name_t name;
+
+    gss_buffer_desc name_desc {
+        initiator.size(), const_cast<char*>(&initiator[0]) };
+    maj_stat = gss_import_name(
+        &min_stat, &name_desc, GSS_C_NT_USER_NAME, &name);
+    if (GSS_ERROR(maj_stat)) {
+        reportError(mech_, maj_stat, min_stat);
+    }
+
+    maj_stat = gss_acquire_cred(
+        &min_stat,
+        name,
+        GSS_C_INDEFINITE,
+        GSS_C_NO_OID_SET,
+        GSS_C_INITIATE,
+        &cred_,
+        NULL,
+        NULL);
+    if (GSS_ERROR(maj_stat))
+        reportError(mech_, maj_stat, min_stat);
+    gss_release_name(&min_stat, &name);
+}
+
 GssClient::~GssClient()
 {
     uint32_t min_stat;

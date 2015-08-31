@@ -1,9 +1,18 @@
+#include <sys/wait.h>
+#include <signal.h>
+
 #include <rpc++/channel.h>
 #include <rpc++/client.h>
 #include <rpc++/server.h>
+#include <rpc++/socket.h>
 
+#include <gflags/gflags.h>
 #include <gtest/gtest.h>
 #include <glog/logging.h>
+
+DEFINE_string(keytab, "./data/krb5/krb5.keytab", "Kerberos keytab");
+DEFINE_string(krb5config, "./data/krb5/krb5.conf", "Kerberos config");
+DEFINE_string(runkdc, "./data/krb5/run-kdc.sh", "Script to start test KDC");
 
 using namespace oncrpc;
 using namespace oncrpc::_detail;
@@ -13,6 +22,59 @@ using namespace std::literals::chrono_literals;
 
 namespace {
 
+class GssEnv: public ::testing::Environment
+{
+public:
+    GssEnv()
+    {
+        AddGlobalTestEnvironment(this);
+    }
+
+    void SetUp() override
+    {
+        LOG(INFO) << "GssEnv::SetUp";
+        pid_ = ::fork();
+        if (pid_ == 0) {
+            LOG(INFO) << "child!";
+            ::setpgid(0, 0);
+            system(FLAGS_runkdc.c_str());
+            ::_Exit(0);
+        }
+        auto addrs = getAddressInfo("tcp://localhost:8888", "tcp");
+        auto& ai = addrs[0];
+        for (;;) {
+            int fd = socket(ai.family, ai.socktype, ai.protocol);
+            if (fd > 0) {
+                Socket sock(fd);
+                try {
+                    sock.connect(ai.addr);
+                } catch (system_error& e) {
+                    if (e.code().value() == ECONNREFUSED) {
+                        this_thread::sleep_for(10ms);
+                        continue;
+                    }
+                    throw;
+                }
+                LOG(INFO) << "KDC is live";
+                sock.close();
+                break;
+            }
+        }
+    }
+
+    void TearDown() override
+    {
+        LOG(INFO) << "GssEnv::TearDown";
+        ::killpg(pid_, SIGTERM);
+        ::waitpid(-pid_, nullptr, 0);
+    }
+
+private:
+    pid_t pid_;
+};
+
+GssEnv* gssenv = new GssEnv;
+
 class GssTest: public ::testing::Test
 {
 public:
@@ -20,13 +82,12 @@ public:
         : svcreg(make_shared<ServiceRegistry>())
     {
         addTestService();
-        ::setenv("KRB5_KTNAME", "test.keytab", true);
-        char hbuf[512];
-        ::gethostname(hbuf, sizeof(hbuf));
-        string principal = "host@";
-        principal += hbuf;
+        ::setenv("KRB5_KTNAME", FLAGS_keytab.c_str(), true);
+        ::setenv("KRB5_CONFIG", FLAGS_krb5config.c_str(), true);
+        string initiator = "test";
+        string principal = "test@localhost";
         client = make_shared<GssClient>(
-            1234, 1, principal, "krb5", GssService::NONE);
+            1234, 1, initiator, principal, "krb5", GssService::NONE);
     }
 
     void testService(CallContext&& ctx)

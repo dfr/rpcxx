@@ -1,3 +1,4 @@
 bazel-*
 *~
 *.core
+data/krb5/db.db

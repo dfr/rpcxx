@@ -177,10 +177,18 @@ void encodeBody(
 class GssClient: public Client
 {
 public:
+    /// Create a client using default initiator credentials
     GssClient(uint32_t program, uint32_t version,
               const std::string& principal,
               const std::string& mechanism,
               GssService service);
+
+    /// Create a client using the given initiator
+    GssClient(uint32_t program, uint32_t version,
+            const std::string& initiator,
+            const std::string& principal,
+            const std::string& mechanism,
+            GssService service);
 
     ~GssClient();
 

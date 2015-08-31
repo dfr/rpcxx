@@ -21,14 +21,26 @@ cc_test(
     srcs = glob(["src/test/*.cpp"]),
     deps = [
         ":rpcxx",
-        "//third_party/glog:glog",
-        "//third_party/gtest:gtest_main"],
+        "//third_party/gflags",
+        "//third_party/glog",
+        "//third_party/gtest"
+    ],
     linkstatic = 1,
     linkopts = select({
         ":freebsd": ["-lgssapi"],
         ":darwin": ["-framework GSS"],
     }),
-    data = ["test.keytab"]
+    data = [
+        "data/krb5/krb5.keytab",
+        "data/krb5/krb5.conf",
+        "data/krb5/run-kdc.sh",
+        "data/krb5/db.dump",
+    ],
+    args = [
+        "--keytab=$(location data/krb5/krb5.keytab)",
+        "--krb5config=$(location data/krb5/krb5.conf)",
+        "--runkdc=$(location data/krb5/run-kdc.sh)",
+    ]
 )
 
 config_setting(
