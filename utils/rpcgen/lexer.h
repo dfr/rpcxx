@@ -44,6 +44,7 @@ public:
         KHYPER,
         KINT,
         KOPAQUE,
+        KOPAQUEREF,
         KPROGRAM,
         KQUADRUPLE,
         KSTRUCT,

@@ -26,6 +26,53 @@ class RecordReader;
 class RecordWriter;
 class ServiceRegistry;
 
+class Message: public XdrMemory
+{
+public:
+    Message(size_t sz);
+
+    size_t writePos() const
+    {
+        return XdrMemory::writePos() + refBytes_;
+    }
+
+    /// Reset the message back to empty
+    void rewind()
+    {
+        refBytes_ = 0;
+        readIndex_ = 0;
+        readCursor_ = readLimit_ = nullptr;
+        writeCursor_ = buf_;
+        writeLimit_ = buf_ + size_;
+        iov_.clear();
+        iov_.emplace_back(iovec{writeCursor_, 0});
+    }
+
+    /// Advance the write cursor. Typically used after reading into the buffer
+    /// from some other source
+    void advanceWrite(size_t sz)
+    {
+        assert(writeCursor_ + sz <= writeLimit_);
+        writeCursor_ += sz;
+    }
+
+    auto iov() const { return iov_; }
+
+    // XdrSink overrides
+    void putBuffer(const std::shared_ptr<Buffer>& buf) override;
+    void flush() override;
+
+    // XdrSource overrides
+    size_t readSize() const override;
+    void fill() override;
+
+private:
+    std::vector<iovec> iov_;
+    std::vector<std::shared_ptr<Buffer>> buffers_;
+    size_t refBytes_ = 0;
+    int readIndex_ = 0;
+};
+
 class Channel: public std::enable_shared_from_this<Channel>
 {
 protected:
@@ -81,23 +128,26 @@ public:
     /// Return a buffer suitable for encoding an outgoing message. When
     /// the message is complete, call sendMessage to send it to the remote
     /// endpoint.
-    virtual std::unique_ptr<XdrMemory> acquireBuffer() = 0;
+    virtual std::unique_ptr<XdrSink> acquireSendBuffer() = 0;
 
     /// Discard a message buffer returned by acquireBuffer or receiveMessage.
-    virtual void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) = 0;
+    virtual void releaseSendBuffer(std::unique_ptr<XdrSink>&& msg) = 0;
 
     /// Send the message to the remote endpoint. The message pointer should
     /// be one previously returned by acquireBuffer and will be released
     /// as for releaseBuffer.
-    virtual void sendMessage(std::unique_ptr<XdrMemory>&& msg) = 0;
+    virtual void sendMessage(std::unique_ptr<XdrSink>&& msg) = 0;
 
     /// Receive an incoming message from the channel. If a message was
     /// received, a buffer containing the message is returned.
     /// This pointer should be released after processing using releaseBuffer.
     /// If no message was received before the timeout, a null pointer is
     /// returned.
-    virtual std::unique_ptr<XdrMemory> receiveMessage(
+    virtual std::unique_ptr<XdrSource> receiveMessage(
         std::shared_ptr<Channel>& replyChan, clock_type::duration timeout) = 0;
+
+    /// Discard a message buffer returned by acquireBuffer or receiveMessage.
+    virtual void releaseReceiveBuffer(std::unique_ptr<XdrSource>&& msg) = 0;
 
 protected:
 
@@ -129,7 +179,7 @@ protected:
         std::condition_variable cv; // signalled when ready
         clock_type::time_point timeout;
         rpc_msg reply;
-        std::unique_ptr<XdrMemory> body;
+        std::unique_ptr<XdrSource> body;
         TimeoutManager::task_type tid = 0;
         bool async = false;
         std::packaged_task<void()> continuation;
@@ -155,12 +205,13 @@ public:
     LocalChannel(std::shared_ptr<ServiceRegistry> svcreg);
 
     // Channel overrides
-    std::unique_ptr<XdrMemory> acquireBuffer() override;
-    void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
-    void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
-    std::unique_ptr<XdrMemory> receiveMessage(
+    std::unique_ptr<XdrSink> acquireSendBuffer() override;
+    void releaseSendBuffer(std::unique_ptr<XdrSink>&& msg) override;
+    void sendMessage(std::unique_ptr<XdrSink>&& msg) override;
+    std::unique_ptr<XdrSource> receiveMessage(
         std::shared_ptr<Channel>& replyChan,
         clock_type::duration timeout) override;
+    void releaseReceiveBuffer(std::unique_ptr<XdrSource>&& msg) override;
 
     /// Process a single queued reply - intended for testing
     void processReply();
@@ -175,11 +226,13 @@ private:
         }
 
         // Channel overrides
-        std::unique_ptr<XdrMemory> acquireBuffer() override;
-        void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
-        void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
-        std::unique_ptr<XdrMemory> receiveMessage(
-            std::shared_ptr<Channel>& replyChan, clock_type::duration timeout) override;
+        std::unique_ptr<XdrSink> acquireSendBuffer() override;
+        void releaseSendBuffer(std::unique_ptr<XdrSink>&& msg) override;
+        void sendMessage(std::unique_ptr<XdrSink>&& msg) override;
+        std::unique_ptr<XdrSource> receiveMessage(
+            std::shared_ptr<Channel>& replyChan,
+            clock_type::duration timeout) override;
+        void releaseReceiveBuffer(std::unique_ptr<XdrSource>&& msg) override;
 
         LocalChannel* chan_;
     };
@@ -211,17 +264,18 @@ public:
     void connect(const Address& addr) override;
 
     // Channel overrides
-    std::unique_ptr<XdrMemory> acquireBuffer() override;
-    void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
-    void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
-    std::unique_ptr<XdrMemory> receiveMessage(
+    std::unique_ptr<XdrSink> acquireSendBuffer() override;
+    void releaseSendBuffer(std::unique_ptr<XdrSink>&& msg) override;
+    void sendMessage(std::unique_ptr<XdrSink>&& msg) override;
+    std::unique_ptr<XdrSource> receiveMessage(
         std::shared_ptr<Channel>& replyChan,
         clock_type::duration timeout) override;
+    void releaseReceiveBuffer(std::unique_ptr<XdrSource>&& msg) override;
 
 protected:
     Address remoteAddr_;
     size_t bufferSize_;
-    std::unique_ptr<XdrMemory> xdrs_;
+    std::unique_ptr<Message> xdrs_;
 };
 
 struct DatagramReplyChannel: public DatagramChannel
@@ -250,23 +304,22 @@ public:
     ~StreamChannel();
 
     // Channel overrides
-    std::unique_ptr<XdrMemory> acquireBuffer() override;
-    void releaseBuffer(std::unique_ptr<XdrMemory>&& msg) override;
-    void sendMessage(std::unique_ptr<XdrMemory>&& msg) override;
-    std::unique_ptr<XdrMemory> receiveMessage(
+    std::unique_ptr<XdrSink> acquireSendBuffer() override;
+    void releaseSendBuffer(std::unique_ptr<XdrSink>&& msg) override;
+    void sendMessage(std::unique_ptr<XdrSink>&& msg) override;
+    std::unique_ptr<XdrSource> receiveMessage(
         std::shared_ptr<Channel>& replyChan,
         clock_type::duration timeout) override;
+    void releaseReceiveBuffer(std::unique_ptr<XdrSource>&& msg) override;
 
 private:
     void readAll(void* buf, size_t len);
-    ptrdiff_t write(const void* buf, size_t len);
 
     size_t bufferSize_;
 
     // Protects sendbuf_ and sender_
     std::mutex writeMutex_;
-    std::unique_ptr<XdrMemory> sendbuf_;
-    std::unique_ptr<RecordWriter> sender_;
+    std::unique_ptr<Message> sendbuf_;
 };
 
 /// Accept incoming connections to a socket and create instances of

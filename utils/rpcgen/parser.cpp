@@ -203,6 +203,7 @@ Parser::parseStructBody()
         // If the next token can start a declaration, parse it
         switch (tok_.type()) {
         case Token::KOPAQUE:
+        case Token::KOPAQUEREF:
         case Token::KSTRING:
         case Token::KVOID:
         case Token::KUNSIGNED:
@@ -368,6 +369,24 @@ Parser::parseDeclaration()
             return make_pair(
                 move(name),
                 make_shared<OpaqueType>(move(value), false));
+        }
+        unexpected();
+    }
+    if (tok_.type() == Token::KOPAQUEREF) {
+        nextToken();
+        auto name = tok_.svalue();
+        expectToken(Token::IDENTIFIER);
+        if (tok_.type() == '<') {
+            nextToken();
+            if (tok_.type() == '>') {
+                nextToken();
+                return make_pair(move(name), make_shared<OpaqueRefType>());
+            }
+            auto value = parseValue();
+            expectToken('>');
+            return make_pair(
+                move(name),
+                make_shared<OpaqueRefType>(move(value)));
         }
         unexpected();
     }

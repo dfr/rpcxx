@@ -53,8 +53,8 @@ public:
     {
         auto chan = make_shared<LocalChannel>(svcreg);
 
-        auto xdrout = chan->acquireBuffer();
-        xdr(call, static_cast<XdrSink*>(xdrout.get()));
+        auto xdrout = chan->acquireSendBuffer();
+        xdr(call, xdrout.get());
         xdrout->putBytes(args.data(), args.size());
         chan->sendMessage(move(xdrout));
 
@@ -68,7 +68,7 @@ public:
             xdrin->getBytes(t.data(), t.size());
             EXPECT_EQ(res, t);
         }
-        chan->releaseBuffer(move(xdrin));
+        chan->releaseReceiveBuffer(move(xdrin));
 
         return reply;
     }

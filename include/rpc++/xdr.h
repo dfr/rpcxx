@@ -40,6 +40,64 @@ public:
         : std::vector<T>(init) {}
 };
 
+/// A reference to buffered application data. This can be used to reduce
+/// memory copies for large buffers. XXX reword
+class Buffer
+{
+public:
+
+    /// A null buffer
+    Buffer()
+        : size_(0),
+          data_(nullptr)
+    {
+    }
+
+    /// A reference to externally managed data
+    Buffer(size_t size, uint8_t* data)
+        : size_(size),
+          data_(data)
+    {
+    }
+
+    /// A reference to data owned by this buffer
+    Buffer(size_t size)
+        : size_(size),
+          storage_(std::make_unique<uint8_t[]>(size)),
+          data_(storage_.get())
+    {
+    }
+
+    /// A view of a subset of another buffer
+    Buffer(std::shared_ptr<Buffer> parent, size_t startIndex, size_t endIndex)
+        : size_(endIndex - startIndex),
+          data_(parent->data() + startIndex),
+          parent_(parent)
+    {
+        assert(startIndex <= parent->size() && endIndex <= parent->size());
+    }
+
+    /// Move constructor
+    Buffer(Buffer&& other)
+        : size_(other.size_),
+          storage_(std::move(other.storage_)),
+          data_(other.data_),
+          parent_(std::move(other.parent_))
+    {
+    }
+
+    auto begin() const { return data_; }
+    auto end() const { return data_ + size_; }
+    size_t size() const { return size_; }
+    uint8_t* data() const { return data_; }
+
+private:
+    size_t size_;
+    std::unique_ptr<uint8_t[]> storage_;
+    uint8_t* data_;
+    std::shared_ptr<Buffer> parent_;
+};
+
 /// A 32-bit word stored in network byte order
 class XdrWord
 {
@@ -143,7 +201,17 @@ public:
         return p;
     }
 
+    /// Flush the write buffer
     virtual void flush() = 0;
+
+    /// Take a reference to an external buffer. The buffer will appear in the
+    /// output stream at this point in the encoded sequence but the contents
+    /// may not be read until later (e.g. when the encoded stream is flushed
+    /// to the network).
+    virtual void putBuffer(const std::shared_ptr<Buffer>& buf)
+    {
+        putBytes(buf->data(), buf->size());
+    }
 
 protected:
     uint8_t* writeCursor_;
@@ -217,7 +285,18 @@ public:
         return p;
     }
 
+    /// Return the number of bytes left to read in this stream
+    virtual size_t readSize() const = 0;
+
+    /// Read more data from the remote data provider
     virtual void fill() = 0;
+
+    /// Get a buffer which contains the next size bytes from the input stream
+    virtual void getBuffer(std::shared_ptr<Buffer>& buf, size_t size)
+    {
+        buf = std::make_shared<Buffer>(size);
+        getBytes(buf->data(), size);
+    }
 
 protected:
     const uint8_t* readCursor_;
@@ -417,6 +496,19 @@ inline void xdr(bounded_string<N>& v, XdrSource* xdrs)
     }
 }
 
+inline void xdr(const std::shared_ptr<Buffer>& v, XdrSink* xdrs)
+{
+    xdrs->putWord(v->size());
+    xdrs->putBuffer(v);
+}
+
+inline void xdr(std::shared_ptr<Buffer>& v, XdrSource* xdrs)
+{
+    uint32_t sz;
+    xdrs->getWord(sz);
+    xdrs->getBuffer(v, sz);
+}
+
 inline void xdr(const int v, XdrSink* xdrs)
 {
     xdr(reinterpret_cast<const uint32_t&>(v), xdrs);
@@ -599,11 +691,6 @@ public:
         writeLimit_ = buf_ + sz;
     }
 
-    size_t readSize() const
-    {
-        return readLimit_ - buf_;
-    }
-
     void setReadSize(size_t sz)
     {
         assert(sz <= size_);
@@ -629,9 +716,13 @@ public:
     void flush() override;
 
     // XdrSource overrides
+    size_t readSize() const override
+    {
+        return readLimit_ - buf_;
+    }
     void fill() override;
 
-private:
+protected:
     std::unique_ptr<uint8_t[]> storage_;
     size_t size_;
     uint8_t* buf_;

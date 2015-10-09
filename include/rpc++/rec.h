@@ -45,6 +45,13 @@ public:
     void endRecord();
 
     // XdrSource overrides
+    size_t readSize() const override
+    {
+        // Right now, we don't need this to be accurate - its only really
+        // needed for accounting in the server and RecordReader is not used
+        // in that context
+        return 0;
+    }
     void fill() override;
 
 private:

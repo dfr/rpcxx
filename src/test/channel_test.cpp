@@ -252,29 +252,72 @@ public:
 class TimeoutChannel: public Channel
 {
 public:
-    unique_ptr<XdrMemory> acquireBuffer() override
+    unique_ptr<XdrSink> acquireSendBuffer() override
     {
         return make_unique<XdrMemory>(buf_, sizeof(buf_));
     }
 
-    void releaseBuffer(unique_ptr<XdrMemory>&& msg) override
+    void releaseSendBuffer(unique_ptr<XdrSink>&& msg) override
     {
         msg.reset();
     }
 
-    void sendMessage(unique_ptr<XdrMemory>&& msg) override
+    void sendMessage(unique_ptr<XdrSink>&& msg) override
     {
         msg.reset();
     }
 
-    unique_ptr<XdrMemory> receiveMessage(
+    unique_ptr<XdrSource> receiveMessage(
         shared_ptr<Channel>&, std::chrono::system_clock::duration timeout) override
     {
         return nullptr;
     }
 
+    void releaseReceiveBuffer(unique_ptr<XdrSource>&& msg) override
+    {
+        msg.reset();
+    }
+
     uint8_t buf_[1500];
 };
+
+TEST_F(ChannelTest, Message)
+{
+    // Three parts - one word, a reference to four bytes and a second word
+    struct test {
+        int foo;
+        shared_ptr<Buffer> bar;
+        int baz;
+
+        int operator==(const test& other) const
+        {
+            if (foo != other.foo || baz != other.baz)
+                return false;
+            if (bar->size() != other.bar->size())
+                return false;
+            for (auto i = 0; i < bar->size(); i++)
+                if (bar->data()[i] != other.bar->data()[i])
+                    return false;
+            return true;
+        }
+    };
+
+    uint8_t buf[4] = {1, 2, 3, 4};
+    test t1 {1234, make_shared<Buffer>(4, buf), 5678};
+
+    Message msg(12);
+    xdr(t1.foo, static_cast<XdrSink*>(&msg));
+    xdr(t1.bar, static_cast<XdrSink*>(&msg));
+    xdr(t1.baz, static_cast<XdrSink*>(&msg));
+    msg.flush();
+
+    test t2;
+    xdr(t2.foo, static_cast<XdrSource*>(&msg));
+    xdr(t2.bar, static_cast<XdrSource*>(&msg));
+    xdr(t2.baz, static_cast<XdrSource*>(&msg));
+
+    EXPECT_EQ(t1, t2);
+}
 
 TEST_F(ChannelTest, Basic)
 {

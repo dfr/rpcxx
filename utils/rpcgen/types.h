@@ -320,6 +320,41 @@ private:
     bool isFixed_;
 };
 
+class OpaqueRefType: public Type
+{
+public:
+    OpaqueRefType()
+    {
+    }
+
+    OpaqueRefType(shared_ptr<Value>&& size)
+        : size_(move(size))
+    {
+    }
+
+    bool isPOD() const override
+    {
+        return false;
+    }
+
+    void print(Indent indent, ostream& str) const override
+    {
+        // XXX handle size_
+        str << "std::shared_ptr<oncrpc::Buffer>";
+    }
+
+    int operator==(const Type& other) const override
+    {
+        auto p = dynamic_cast<const OpaqueRefType*>(&other);
+        if (p)
+            return *size_.get() == *p->size_.get();
+        return false;
+    }
+
+private:
+    shared_ptr<Value> size_;
+};
+
 class StringType: public Type
 {
 public:

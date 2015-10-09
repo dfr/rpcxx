@@ -42,6 +42,21 @@ public:
     {
         return nullptr;
     }
+
+    bar getbar() override
+    {
+        return bar(1, 2);
+    }
+
+    int32_t write(const writereq& req) override
+    {
+        int sum = 0;
+        auto p = req.buf->data();
+        auto sz = int(req.buf->size());
+        for (auto i = 0; i < sz; i++)
+            sum += p[i];
+        return sum;
+    }
 };
 
 TEST_F(ServerTest, Call)
@@ -53,6 +68,17 @@ TEST_F(ServerTest, Call)
     EXPECT_EQ(1234, client.echo(1234));
     srv->unbind(svcreg);
     EXPECT_THROW(client.null(), ProgramUnavailable);
+}
+
+TEST_F(ServerTest, CallRef)
+{
+    auto chan = make_shared<LocalChannel>(svcreg);
+    auto srv = make_shared<Test1Impl>();
+    srv->bind(svcreg);
+    Test1<> client(chan);
+
+    uint8_t buf[] = {1, 2, 3, 4};
+    EXPECT_EQ(10, client.write(writereq{make_shared<Buffer>(4, buf)}));
 }
 
 }

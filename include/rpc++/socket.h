@@ -12,6 +12,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/uio.h>
 
 #include <rpc++/timeout.h>
 
@@ -188,9 +189,33 @@ public:
         return len;
     }
 
+    auto send(const std::vector<iovec>& iov)
+    {
+        auto len = ::writev(fd_, iov.data(), iov.size());
+        if (len < 0)
+            throw std::system_error(errno, std::system_category());
+        return len;
+    }
+
     auto sendto(const void* buf, size_t buflen, const Address& addr)
     {
         auto len = ::sendto(fd_, buf, buflen, 0, addr.addr(), addr.len());
+        if (len < 0)
+            throw std::system_error(errno, std::system_category());
+        return len;
+    }
+
+    auto sendto(const std::vector<iovec>& iov, const Address& addr)
+    {
+        msghdr mh;
+        mh.msg_name = const_cast<sockaddr*>(addr.addr());
+        mh.msg_namelen = addr.len();
+        mh.msg_iov = const_cast<iovec*>(iov.data());
+        mh.msg_iovlen = iov.size();
+        mh.msg_control = nullptr;
+        mh.msg_controllen = 0;
+        mh.msg_flags = 0;
+        auto len = ::sendmsg(fd_, &mh, 0);
         if (len < 0)
             throw std::system_error(errno, std::system_category());
         return len;

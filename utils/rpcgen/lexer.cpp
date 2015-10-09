@@ -20,6 +20,7 @@ static unordered_map<string, int> keywords = {
     { "hyper", Token::KHYPER },
     { "int", Token::KINT },
     { "opaque", Token::KOPAQUE },
+    { "opaqueref", Token::KOPAQUEREF },
     { "program", Token::KPROGRAM },
     { "quadruple", Token::KQUADRUPLE },
     { "struct", Token::KSTRUCT },

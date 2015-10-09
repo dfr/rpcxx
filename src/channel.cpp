@@ -33,6 +33,68 @@ static auto toMilliseconds(Dur dur)
         dur).count();
 }
 
+Message::Message(size_t sz)
+    : XdrMemory(sz)
+{
+    iov_.emplace_back(iovec{writeCursor_, 0});
+    readCursor_ = readLimit_ = nullptr;
+}
+
+void
+Message::putBuffer(const std::shared_ptr<Buffer>& buf)
+{
+    auto p = buf->data();
+    auto len = buf->size();
+
+    if (len == 0)
+        return;
+
+    refBytes_ += len;
+    iovec* iovp = &iov_.back();
+    void* base = iovp->iov_base;
+    void* wp = writeCursor_;
+    if (wp > base) {
+        iovp->iov_len = uintptr_t(wp) - uintptr_t(base);
+        iov_.emplace_back(iovec{p, len});
+    }
+    else {
+        *iovp = iovec{p, len};
+    }
+    iov_.emplace_back(iovec{writeCursor_, 0});
+    buffers_.push_back(buf);
+}
+
+void
+Message::flush()
+{
+    iovec* iovp = &iov_.back();
+    void* base = iovp->iov_base;
+    void* wp = writeCursor_;
+    if (wp > base) {
+        iovp->iov_len = uintptr_t(wp) - uintptr_t(base);
+    }
+    else {
+        iov_.pop_back();
+    }
+}
+
+size_t
+Message::readSize() const
+{
+    return XdrMemory::readSize() + refBytes_;
+}
+
+void
+Message::fill()
+{
+    if (readIndex_ == iov_.size())
+        throw XdrError("overflow");
+    auto iovp = &iov_[readIndex_];
+    readCursor_ = reinterpret_cast<const uint8_t*>(iovp->iov_base);
+    readLimit_ = readCursor_ + iovp->iov_len;
+    readIndex_++;
+}
+
 std::chrono::seconds Channel::maxBackoff(30);
 
 std::shared_ptr<Channel> Channel::open(const AddressInfo& ai)
@@ -126,7 +188,7 @@ Channel::callAsync(
     auto now = clock_type::now();
     auto maxTime = now + timeout;
     int gen;
-    std::unique_ptr<XdrMemory> xdrout;
+    std::unique_ptr<XdrSink> xdrout;
 
     std::unique_lock<std::mutex> lock(mutex_);
     xid = tx.xid = xid_++;
@@ -143,7 +205,7 @@ Channel::callAsync(
                 client, proc, xargs, xresults, prot, timeout);
         }
 
-        xdrout = acquireBuffer();
+        xdrout = acquireSendBuffer();
         if (!client->processCall(
             xid, gen, proc, xdrout.get(), xargs, prot, tx.seq)) {
             continue;
@@ -216,7 +278,7 @@ Channel::call(
 
         // Drop the lock while we transmit
         lock.unlock();
-        auto xdrout = acquireBuffer();
+        auto xdrout = acquireSendBuffer();
         if (!client->processCall(
             xid, gen, proc, xdrout.get(), xargs, prot, tx.seq)) {
             lock.lock();
@@ -344,7 +406,7 @@ bool Channel::processIncomingMessage(
 {
     auto now = clock_type::now();
     auto timeoutPoint = now + timeout;
-    std::unique_ptr<XdrMemory> body;
+    std::unique_ptr<XdrSource> body;
     std::shared_ptr<Channel> replyChan;
     while (!body) {
         clock_type::time_point stopPoint;
@@ -420,7 +482,7 @@ bool Channel::processIncomingMessage(
     VLOG(3) << "xid: " << msg.xid << ": dropping message";
 drop:
     lock.unlock();
-    releaseBuffer(std::move(body));
+    releaseReceiveBuffer(std::move(body));
     lock.lock();
     return true;
 }
@@ -438,11 +500,11 @@ Channel::processReply(
             xresults, prot)) {
             return false;
         }
-        releaseBuffer(std::move(tx.body));
+        releaseReceiveBuffer(std::move(tx.body));
         return true;
     }
     else {
-        releaseBuffer(std::move(tx.body));
+        releaseReceiveBuffer(std::move(tx.body));
         switch (tx.reply.rbody().stat) {
         case MSG_ACCEPTED: {
             const auto& areply = tx.reply.rbody().areply();
@@ -508,21 +570,22 @@ LocalChannel::LocalChannel(std::shared_ptr<ServiceRegistry> svcreg)
 {
 }
 
-std::unique_ptr<XdrMemory>
-LocalChannel::acquireBuffer()
+std::unique_ptr<XdrSink>
+LocalChannel::acquireSendBuffer()
 {
     return std::make_unique<XdrMemory>(bufferSize_);
 }
 
 void
-LocalChannel::releaseBuffer(std::unique_ptr<XdrMemory>&& msg)
+LocalChannel::releaseSendBuffer(std::unique_ptr<XdrSink>&& msg)
 {
     msg.reset();
 }
 
 void
-LocalChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
+LocalChannel::sendMessage(std::unique_ptr<XdrSink>&& xdrs)
 {
+    std::unique_ptr<XdrMemory> msg(static_cast<XdrMemory*>(xdrs.release()));
     msg->setReadSize(msg->writePos());
     msg->rewind();
     rpc_msg call_msg;
@@ -532,35 +595,7 @@ LocalChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
             std::move(call_msg), std::move(msg), replyChannel_));
 }
 
-std::unique_ptr<XdrMemory>
-LocalChannel::ReplyChannel::acquireBuffer()
-{
-    return std::make_unique<XdrMemory>(chan_->bufferSize_);
-}
-
-void
-LocalChannel::ReplyChannel::releaseBuffer(std::unique_ptr<XdrMemory>&& msg)
-{
-    msg.reset();
-}
-
-void
-LocalChannel::ReplyChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
-{
-    msg->setReadSize(msg->writePos());
-    msg->rewind();
-    std::unique_lock<std::mutex> lock(chan_->mutex_);
-    chan_->queue_.emplace_back(std::move(msg));
-}
-
-std::unique_ptr<XdrMemory>
-LocalChannel::ReplyChannel::receiveMessage(
-    std::shared_ptr<Channel>&, clock_type::duration)
-{
-    return nullptr;
-}
-
-std::unique_ptr<XdrMemory>
+std::unique_ptr<XdrSource>
 LocalChannel::receiveMessage(
     std::shared_ptr<Channel>& replyChan, clock_type::duration timeout)
 {
@@ -574,6 +609,13 @@ LocalChannel::receiveMessage(
 }
 
 void
+LocalChannel::releaseReceiveBuffer(
+    std::unique_ptr<XdrSource>&& msg)
+{
+    msg.reset();
+}
+
+void
 LocalChannel::processReply()
 {
     using namespace std::literals::chrono_literals;
@@ -583,6 +625,42 @@ LocalChannel::processReply()
     running_ = true;
     processIncomingMessage(nulltx, lock, 0s);
     running_ = false;
+}
+
+std::unique_ptr<XdrSink>
+LocalChannel::ReplyChannel::acquireSendBuffer()
+{
+    return std::make_unique<XdrMemory>(chan_->bufferSize_);
+}
+
+void
+LocalChannel::ReplyChannel::releaseSendBuffer(std::unique_ptr<XdrSink>&& msg)
+{
+    msg.reset();
+}
+
+void
+LocalChannel::ReplyChannel::sendMessage(std::unique_ptr<XdrSink>&& xdrs)
+{
+    std::unique_ptr<XdrMemory> msg(static_cast<XdrMemory*>(xdrs.release()));
+    msg->setReadSize(msg->writePos());
+    msg->rewind();
+    std::unique_lock<std::mutex> lock(chan_->mutex_);
+    chan_->queue_.emplace_back(std::move(msg));
+}
+
+std::unique_ptr<XdrSource>
+LocalChannel::ReplyChannel::receiveMessage(
+    std::shared_ptr<Channel>&, clock_type::duration)
+{
+    return nullptr;
+}
+
+void
+LocalChannel::ReplyChannel::releaseReceiveBuffer(
+    std::unique_ptr<XdrSource>&& msg)
+{
+    msg.reset();
 }
 
 SocketChannel::SocketChannel(int sock)
@@ -624,7 +702,7 @@ SocketChannel::onReadable(SocketManager* sockman)
 DatagramChannel::DatagramChannel(int sock)
     : SocketChannel(sock),
       bufferSize_(1500),
-      xdrs_(std::make_unique<XdrMemory>(bufferSize_))
+      xdrs_(std::make_unique<Message>(bufferSize_))
 {
 }
 
@@ -641,78 +719,85 @@ DatagramChannel::connect(const Address& addr)
     remoteAddr_ = addr;
 }
 
-std::unique_ptr<XdrMemory>
-DatagramChannel::acquireBuffer()
+std::unique_ptr<XdrSink>
+DatagramChannel::acquireSendBuffer()
 {
     std::unique_lock<std::mutex> lock(mutex_);
     if (xdrs_) {
-        xdrs_->rewind();
         xdrs_->setWriteSize(xdrs_->bufferSize());
         return std::move(xdrs_);
     }
     else {
-        return std::make_unique<XdrMemory>(bufferSize_);
+        return std::make_unique<Message>(bufferSize_);
     }
 }
 
 void
-DatagramChannel::releaseBuffer(std::unique_ptr<XdrMemory>&& msg)
+DatagramChannel::releaseSendBuffer(std::unique_ptr<XdrSink>&& xdrs)
 {
+    std::unique_ptr<Message> msg(static_cast<Message*>(xdrs.release()));
+    msg->rewind();
     std::unique_lock<std::mutex> lock(mutex_);
     xdrs_ = std::move(msg);
 }
 
 void
-DatagramChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
+DatagramChannel::sendMessage(std::unique_ptr<XdrSink>&& xdrs)
 {
-    sendto(msg->buf(), msg->writePos(), remoteAddr_);
-    releaseBuffer(std::move(msg));
+    std::unique_ptr<Message> msg(static_cast<Message*>(xdrs.release()));
+    msg->flush();
+    sendto(msg->iov(), remoteAddr_);
+    releaseSendBuffer(std::move(msg));
 }
 
-std::unique_ptr<XdrMemory>
+std::unique_ptr<XdrSource>
 DatagramChannel::receiveMessage(
     std::shared_ptr<Channel>& replyChan, clock_type::duration timeout)
 {
     if (!waitForReadable(timeout))
         return nullptr;
 
-    std::unique_ptr<XdrMemory> msg;
+    std::unique_ptr<Message> msg;
     {
         std::unique_lock<std::mutex> lock(mutex_);
         if (xdrs_)
             msg = std::move(xdrs_);
     }
     if (!msg)
-        msg = std::make_unique<XdrMemory>(bufferSize_);
+        msg = std::make_unique<Message>(bufferSize_);
 
     Address addr;
     auto bytes = recvfrom(msg->buf(), msg->bufferSize(), addr);
     if (bytes == 0)
         return nullptr;
 
+    // Set up the message to decode the packaged_task
+    msg->advanceWrite(bytes);
+    msg->flush();
+
     // We could try to cache reply channels here but there is little point
     // since the allocation is cheap and datagram sockets are discouraged
     // for high-performance applications
-    replyChan = std::make_shared<DatagramReplyChannel>(fd_, addr);    msg->rewind();
-    msg->setReadSize(bytes);
+    replyChan = std::make_shared<DatagramReplyChannel>(fd_, addr);
     return std::move(msg);
+}
+
+void
+DatagramChannel::releaseReceiveBuffer(std::unique_ptr<XdrSource>&& xdrs)
+{
+    std::unique_ptr<Message> msg(static_cast<Message*>(xdrs.release()));
+    msg->rewind();
+    std::unique_lock<std::mutex> lock(mutex_);
+    xdrs_ = std::move(msg);
 }
 
 StreamChannel::StreamChannel(int sock)
     : SocketChannel(sock),
-      bufferSize_(1500),
-      sender_(
-          std::make_unique<RecordWriter>(
-              bufferSize_,
-              [this](const void* buf, size_t len)
-              {
-                  return write(buf, len);
-              }))
+      bufferSize_(1500)
 {
 }
 
-StreamChannel::StreamChannel(
-    int sock, std::shared_ptr<ServiceRegistry> svcreg)
+StreamChannel::StreamChannel(int sock, std::shared_ptr<ServiceRegistry> svcreg)
     : StreamChannel(sock)
 {
     svcreg_ = svcreg;
@@ -722,36 +807,45 @@ StreamChannel::~StreamChannel()
 {
 }
 
-std::unique_ptr<XdrMemory>
-StreamChannel::acquireBuffer()
+std::unique_ptr<XdrSink>
+StreamChannel::acquireSendBuffer()
 {
     std::unique_lock<std::mutex> lock(writeMutex_);
-    std::unique_ptr<XdrMemory> msg = std::move(sendbuf_);
+    std::unique_ptr<Message> msg = std::move(sendbuf_);
     if (!msg) {
-        msg = std::make_unique<XdrMemory>(bufferSize_);
+        msg = std::make_unique<Message>(bufferSize_);
     }
+    msg->putWord(0);    // make space for record marker
     return std::move(msg);
 }
 
 void
-StreamChannel::releaseBuffer(std::unique_ptr<XdrMemory>&& msg)
+StreamChannel::releaseSendBuffer(std::unique_ptr<XdrSink>&& xdrs)
 {
+    std::unique_ptr<Message> msg(static_cast<Message*>(xdrs.release()));
     std::unique_lock<std::mutex> lock(writeMutex_);
-    // XXX: rework the receive path to use standard sized buffers
-    if (msg->bufferSize() != bufferSize_) {
-        msg.reset();
-        return;
-    }
     msg->rewind();
     sendbuf_ = std::move(msg);
 }
 
 void
-StreamChannel::sendMessage(std::unique_ptr<XdrMemory>&& msg)
+StreamChannel::sendMessage(std::unique_ptr<XdrSink>&& xdrs)
 {
+    std::unique_ptr<Message> msg(static_cast<Message*>(xdrs.release()));
+    msg->flush();
+
+    // Send this as a single fragment record
+    auto iov = msg->iov();
+    auto len = msg->writePos();
+    *reinterpret_cast<XdrWord*>(iov[0].iov_base) =
+        (len - sizeof(uint32_t)) | (1<<31);
+
     std::unique_lock<std::mutex> lock(writeMutex_);
-    sender_->putBytes(msg->buf(), msg->writePos());
-    sender_->pushRecord();
+    VLOG(3) << "writing " << len << " bytes to socket";
+    auto bytes = send(iov);
+    if (bytes == 0)
+        throw std::system_error(ENOTCONN, std::system_category());
+
     msg->rewind();
     sendbuf_ = std::move(msg);
 }
@@ -771,7 +865,7 @@ StreamChannel::readAll(void* buf, size_t len)
     }
 }
 
-std::unique_ptr<XdrMemory>
+std::unique_ptr<XdrSource>
 StreamChannel::receiveMessage(
     std::shared_ptr<Channel>& replyChan, clock_type::duration timeout)
 {
@@ -812,22 +906,11 @@ StreamChannel::receiveMessage(
     return std::move(msg);
 }
 
-ptrdiff_t
-StreamChannel::write(const void* buf, size_t len)
+void
+StreamChannel::releaseReceiveBuffer(std::unique_ptr<XdrSource>&& xdrs)
 {
-    // This will always be called via sendMessage with writeMutex_ held.
-    auto p = reinterpret_cast<const uint8_t*>(buf);
-    auto n = len;
-
-    VLOG(3) << "writing " << len << " bytes to socket";
-    while (n > 0) {
-        auto bytes = send(p, len);
-        if (bytes == 0)
-            throw std::system_error(ENOTCONN, std::system_category());
-        p += bytes;
-        n -= bytes;
-    }
-    return len;
+    // XXX: rework the receive path to use standard sized buffers
+    xdrs.reset();
 }
 
 bool
