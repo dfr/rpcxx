@@ -668,6 +668,10 @@ public:
         : XdrMemory(static_cast<uint8_t*>(p), sz)
     {
     }
+    XdrMemory(std::string& s)
+        : XdrMemory(reinterpret_cast<uint8_t*>(&s[0]), s.size())
+    {
+    }
 
     uint8_t* buf() const
     {
