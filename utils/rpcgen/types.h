@@ -880,6 +880,7 @@ public:
             << *discriminant_.second << " _v) {" << endl;
         ++indent;
         str << indent << "if (_hasValue) _clear();" << endl;
+        str << indent << discriminant_.first << " = _v;" << endl;
         printSwitch(
             indent, str, "",
             [&str](Indent indent, auto name, auto type)
@@ -890,7 +891,6 @@ public:
                     << *type << "();" << endl;
             });
         str << indent << "_hasValue = true;" << endl;
-        str << indent << discriminant_.first << " = _v;" << endl;
         --indent;
         str << indent << "}" << endl;
     }
