@@ -91,6 +91,11 @@ public:
     size_t size() const { return size_; }
     uint8_t* data() const { return data_; }
 
+    std::string toString() const
+    {
+        return std::string(reinterpret_cast<const char*>(data_), size_);
+    }
+
 private:
     size_t size_;
     std::unique_ptr<uint8_t[]> storage_;
