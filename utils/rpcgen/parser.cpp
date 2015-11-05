@@ -142,6 +142,11 @@ Parser::parseValue()
     if (tok_.type() == Token::IDENTIFIER) {
         auto name = tok_.svalue();
         nextToken();
+        // Translate booleans to C++ keywords
+        if (name == "TRUE")
+            name = "true";
+        else if (name == "FALSE")
+            name = "false";
         return make_shared<VariableValue>(name);
     }
     else if (tok_.type() == Token::INTEGER) {
