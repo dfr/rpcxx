@@ -26,7 +26,7 @@ class bounded_string: public std::string
 public:
     bounded_string() {}
     bounded_string(const char* s) : std::string(s) {}
-    bounded_string(std::string& s) : std::string(s) {}
+    bounded_string(const std::string& s) : std::string(s) {}
     bounded_string(const bounded_string& other) : std::string(other) {}
 };
 
