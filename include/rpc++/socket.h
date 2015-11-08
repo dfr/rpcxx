@@ -174,6 +174,13 @@ public:
             throw std::system_error(errno, std::system_category());
     }
 
+    /// Listen for connections
+    virtual void listen()
+    {
+        if (::listen(fd_, SOMAXCONN) < 0)
+            throw std::system_error(errno, std::system_category());
+    }
+
     /// Connect the socker to a remote address
     virtual void connect(const Address& addr)
     {
