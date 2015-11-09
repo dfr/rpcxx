@@ -296,6 +296,7 @@ AddressInfo oncrpc::uaddr2taddr(
 }
 
 SocketManager::SocketManager()
+    : idleTimeout_(std::chrono::seconds(30))
 {
     ::pipe(pipefds_);
 }
@@ -307,15 +308,17 @@ SocketManager::~SocketManager()
 }
 
 void
-SocketManager::add(std::shared_ptr<Socket> sock)
+SocketManager::add(std::shared_ptr<Socket> sock, bool closeOnIdle)
 {
+    VLOG(3) << "adding socket " << sock->fd();
     std::unique_lock<std::mutex> lock(mutex_);
-    sockets_[sock->fd()] = sock;
+    sockets_[sock->fd()] = entry{sock, clock_type::now(), closeOnIdle};
 }
 
 void
 SocketManager::remove(std::shared_ptr<Socket> sock)
 {
+    VLOG(3) << "removing socket " << sock->fd();
     std::unique_lock<std::mutex> lock(mutex_);
     sockets_.erase(sock->fd());
 }
@@ -326,24 +329,39 @@ SocketManager::run()
     std::unique_lock<std::mutex> lock(mutex_);
     running_ = true;
     while (sockets_.size() > 0 && !stopping_) {
+        auto idleLimit = clock_type::now() - idleTimeout_;
+        std::vector<std::shared_ptr<Socket>> idle;
         fd_set rset;
         int maxfd = pipefds_[0];
         FD_ZERO(&rset);
         FD_SET(pipefds_[0], &rset);
         for (const auto& i: sockets_) {
+            if (i.second.closeOnIdle && i.second.active < idleLimit) {
+                VLOG(3) << "idle timeout for socket " << i.second.socket->fd();
+                idle.push_back(i.second.socket);
+                continue;
+            }
             int fd = i.first;
             maxfd = std::max(maxfd, fd);
             FD_SET(fd, &rset);
         }
         lock.unlock();
+
+        for (auto sock: idle) {
+            remove(sock);
+        }
+        idle.clear();
+
         auto stopTime = next();
         auto now = clock_type::now();
         auto timeout = std::chrono::duration_cast<std::chrono::microseconds>(
-            stopTime - now).count();
-        if (timeout < 0)
-            timeout = 0;
-        auto sec = timeout / 1000000;
-        auto usec = timeout % 1000000;
+            stopTime - now);
+        if (timeout > idleTimeout_)
+            timeout = idleTimeout_;
+        if (timeout.count() < 0)
+            timeout = std::chrono::seconds(0);
+        auto sec = timeout.count() / 1000000;
+        auto usec = timeout.count() % 1000000;
         if (sec > 999999)
             sec = 999999; //std::numeric_limits<int>::max();
         VLOG(3) << "sleeping for " << sec << "." << usec << "s";
@@ -354,7 +372,8 @@ SocketManager::run()
         }
 
         // Execute timeouts, if any
-        update(clock_type::now());
+        now = clock_type::now();
+        update(now);
 
         lock.lock();
         if (nready == 0) {
@@ -368,9 +387,10 @@ SocketManager::run()
         }
 
         std::vector<std::shared_ptr<Socket>> ready;
-        for (const auto& i: sockets_) {
+        for (auto& i: sockets_) {
             if (FD_ISSET(i.first, &rset)) {
-                ready.push_back(i.second);
+                i.second.active = now;
+                ready.push_back(i.second.socket);
             }
         }
         lock.unlock();

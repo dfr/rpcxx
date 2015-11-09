@@ -846,7 +846,7 @@ StreamChannel::acquireSendBuffer()
 {
     std::unique_lock<std::mutex> lock(writeMutex_);
     std::unique_ptr<Message> msg = std::move(sendbuf_);
-    if (msg->bufferSize() != bufferSize_)
+    if (msg && msg->bufferSize() != bufferSize_)
         msg.reset();
     if (!msg) {
         msg = std::make_unique<Message>(bufferSize_);
@@ -1012,6 +1012,6 @@ ListenSocket::onReadable(SocketManager* sockman)
     ::setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     auto chan = std::make_shared<StreamChannel>(newsock, svcreg_);
     chan->setBufferSize(bufferSize_);
-    sockman->add(chan);
+    sockman->add(chan, true);
     return true;
 }

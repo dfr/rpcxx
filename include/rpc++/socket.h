@@ -116,7 +116,7 @@ public:
     SocketManager();
     ~SocketManager();
 
-    void add(std::shared_ptr<Socket> conn);
+    void add(std::shared_ptr<Socket> conn, bool closeOnIdle = false);
 
     void remove(std::shared_ptr<Socket> conn);
 
@@ -124,16 +124,26 @@ public:
 
     void stop();
 
+    auto idleTimeout() const { return idleTimeout_; }
+    void setIdleTimeout(clock_type::duration d) { idleTimeout_ = d; }
+
     // TimeoutManager overrides
     task_type add(
         clock_type::time_point when, std::function<void()> what) override;
 
 private:
+    struct entry {
+        std::shared_ptr<Socket> socket;
+        clock_type::time_point active;      // time last active
+        bool closeOnIdle;
+    };
+
     std::mutex mutex_;
     bool running_ = false;
     bool stopping_ = false;
-    std::unordered_map<int, std::shared_ptr<Socket>> sockets_;
+    std::unordered_map<int, entry> sockets_;
     int pipefds_[2];
+    clock_type::duration idleTimeout_;
 };
 
 struct Socket
