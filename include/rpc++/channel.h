@@ -82,6 +82,8 @@ public:
     typedef std::chrono::system_clock clock_type;
     static std::chrono::seconds maxBackoff;
 
+    static constexpr int DEFAULT_BUFFER_SIZE = 1500;
+
     /// Helper function for creating and opening channels
     static std::shared_ptr<Channel> open(const AddressInfo& ai);
     static std::shared_ptr<Channel> open(
@@ -149,6 +151,12 @@ public:
     /// Discard a message buffer returned by acquireBuffer or receiveMessage.
     virtual void releaseReceiveBuffer(std::unique_ptr<XdrSource>&& msg) = 0;
 
+    /// Return the current channel buffer size
+    auto bufferSize() const { return bufferSize_; }
+
+    /// Set the channel buffer size
+    void setBufferSize(size_t sz) { bufferSize_ = sz; }
+
 protected:
 
     /// Read a message from the channel. If the message is a reply, try to
@@ -187,6 +195,7 @@ protected:
     };
 
     uint32_t xid_;
+    size_t bufferSize_ = DEFAULT_BUFFER_SIZE;
     clock_type::duration retransmitInterval_;
 
     // The mutex serialises access to running_, pending_ and all
@@ -238,7 +247,6 @@ private:
         LocalChannel* chan_;
     };
 
-    size_t bufferSize_;
     std::deque<std::unique_ptr<XdrMemory>> queue_;
     std::shared_ptr<ReplyChannel> replyChannel_;
 };
@@ -275,7 +283,6 @@ public:
 
 protected:
     Address remoteAddr_;
-    size_t bufferSize_;
     std::unique_ptr<Message> xdrs_;
 };
 
@@ -316,8 +323,6 @@ public:
 private:
     void readAll(void* buf, size_t len);
 
-    size_t bufferSize_;
-
     // Protects sendbuf_ and sender_
     std::mutex writeMutex_;
     std::unique_ptr<Message> sendbuf_;
@@ -352,11 +357,18 @@ public:
     {
     }
 
+    /// Return the buffer size for new channels
+    auto bufferSize() const { return bufferSize_; }
+
+    /// Set the channel buffer size for new channels
+    void setBufferSize(size_t sz) { bufferSize_ = sz; }
+
     // Socket overrides
     bool onReadable(SocketManager* sockman) override;
 
 private:
     std::shared_ptr<ServiceRegistry> svcreg_;
+    size_t bufferSize_ = Channel::DEFAULT_BUFFER_SIZE;
 };
 
 }

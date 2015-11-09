@@ -593,7 +593,6 @@ Channel::processReply(
 
 LocalChannel::LocalChannel(std::shared_ptr<ServiceRegistry> svcreg)
     : Channel(svcreg),
-      bufferSize_(1500),       // XXX size
       replyChannel_(std::make_shared<ReplyChannel>(this))
 {
 }
@@ -729,7 +728,6 @@ SocketChannel::onReadable(SocketManager* sockman)
 
 DatagramChannel::DatagramChannel(int sock)
     : SocketChannel(sock),
-      bufferSize_(1500),
       xdrs_(std::make_unique<Message>(bufferSize_))
 {
 }
@@ -751,6 +749,8 @@ std::unique_ptr<XdrSink>
 DatagramChannel::acquireSendBuffer()
 {
     std::unique_lock<std::mutex> lock(mutex_);
+    if (xdrs_ && xdrs_->bufferSize() != bufferSize_)
+        xdrs_.reset();
     if (xdrs_) {
         xdrs_->setWriteSize(xdrs_->bufferSize());
         return std::move(xdrs_);
@@ -788,8 +788,12 @@ DatagramChannel::receiveMessage(
     std::unique_ptr<Message> msg;
     {
         std::unique_lock<std::mutex> lock(mutex_);
-        if (xdrs_)
-            msg = std::move(xdrs_);
+        if (xdrs_) {
+            if (xdrs_->bufferSize() == bufferSize_)
+                msg = std::move(xdrs_);
+            else
+                xdrs_.reset();
+        }
     }
     if (!msg)
         msg = std::make_unique<Message>(bufferSize_);
@@ -820,8 +824,7 @@ DatagramChannel::releaseReceiveBuffer(std::unique_ptr<XdrSource>&& xdrs)
 }
 
 StreamChannel::StreamChannel(int sock)
-    : SocketChannel(sock),
-      bufferSize_(1500)
+    : SocketChannel(sock)
 {
 }
 
@@ -840,6 +843,8 @@ StreamChannel::acquireSendBuffer()
 {
     std::unique_lock<std::mutex> lock(writeMutex_);
     std::unique_ptr<Message> msg = std::move(sendbuf_);
+    if (msg->bufferSize() != bufferSize_)
+        msg.reset();
     if (!msg) {
         msg = std::make_unique<Message>(bufferSize_);
     }
@@ -1000,6 +1005,8 @@ ListenSocket::onReadable(SocketManager* sockman)
     if (newsock < 0)
         throw std::system_error(errno, std::system_category());
     VLOG(3) << "New connection fd: " << newsock;
-    sockman->add(std::make_shared<StreamChannel>(newsock, svcreg_));
+    auto chan = std::make_shared<StreamChannel>(newsock, svcreg_);
+    chan->setBufferSize(bufferSize_);
+    sockman->add(chan);
     return true;
 }

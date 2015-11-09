@@ -101,6 +101,10 @@ void ProgramVersion::printInterface(
          << "public:" << endl;
 
     ++indent;
+
+    str << indent << "virtual size_t bufferSize() const { return 0; }" << endl;
+    str << indent << "virtual void setBufferSize(size_t sz) {}" << endl;
+
     for (const auto& proc: *this) {
         proc->printDeclaration(
             indent, prefixlen, "virtual ", " = 0;", str);
@@ -156,7 +160,20 @@ void ProgramVersion::printClientStubs(
     --indent;
     str << indent << "{}" << endl << endl;
 
-    str << "public:" << endl;
+    str << indent << "size_t bufferSize() const override" << endl;
+    str << indent << "{" << endl;
+    ++indent;
+    str << indent << "return channel_->bufferSize();" << endl;
+    --indent;
+    str << indent << "}" << endl;
+
+    str << indent << "void setBufferSize(size_t sz) override" << endl;
+    str << indent << "{" << endl;
+    ++indent;
+    str << indent << "channel_->setBufferSize(sz);" << endl;
+    --indent;
+    str << indent << "}" << endl;
+
     for (const auto& proc: *this) {
         proc->printDeclaration(
             indent, prefixlen, "", " override", str);
