@@ -45,6 +45,16 @@ public:
     }
 };
 
+/// Used to force Channel::call to re-send a message after a reconnect
+class ResendMessage: public RpcError
+{
+public:
+    ResendMessage()
+        : RpcError("resend")
+    {
+    }
+};
+
 /// MSG_ACCEPTED, PROG_UNAVAIL
 class ProgramUnavailable: public RpcError
 {

@@ -188,7 +188,7 @@ public:
             throw std::system_error(errno, std::system_category());
     }
 
-    auto send(const void* buf, size_t buflen)
+    virtual ssize_t send(const void* buf, size_t buflen)
     {
         auto len = ::send(fd_, buf, buflen, 0);
         if (len < 0)
@@ -196,7 +196,7 @@ public:
         return len;
     }
 
-    auto send(const std::vector<iovec>& iov)
+    virtual ssize_t send(const std::vector<iovec>& iov)
     {
         auto len = ::writev(fd_, iov.data(), iov.size());
         if (len < 0)
@@ -204,7 +204,7 @@ public:
         return len;
     }
 
-    auto sendto(const void* buf, size_t buflen, const Address& addr)
+    virtual ssize_t sendto(const void* buf, size_t buflen, const Address& addr)
     {
         auto len = ::sendto(fd_, buf, buflen, 0, addr.addr(), addr.len());
         if (len < 0)
@@ -212,7 +212,7 @@ public:
         return len;
     }
 
-    auto sendto(const std::vector<iovec>& iov, const Address& addr)
+    virtual ssize_t sendto(const std::vector<iovec>& iov, const Address& addr)
     {
         msghdr mh;
         mh.msg_name = const_cast<sockaddr*>(addr.addr());
@@ -228,7 +228,7 @@ public:
         return len;
     }
 
-    auto recv(void* buf, size_t buflen)
+    virtual ssize_t recv(void* buf, size_t buflen)
     {
         auto len = ::recv(fd_, buf, buflen, 0);
         if (len < 0)
@@ -236,7 +236,7 @@ public:
         return len;
     }
 
-    auto recvfrom(void* buf, size_t buflen, Address& addr)
+    virtual ssize_t recvfrom(void* buf, size_t buflen, Address& addr)
     {
         socklen_t alen = addr.storageLen();
         auto len = ::recvfrom(fd_, buf, buflen, 0, addr.addr(), &alen);

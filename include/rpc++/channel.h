@@ -171,7 +171,8 @@ protected:
             SEND,       // sending message
             AUTH,       // possibly asleep performing authentication
             REPLY,      // waiting for some reply message
-            SLEEPING    // sleeping in Channel::call waiting for reply
+            SLEEPING,   // sleeping in Channel::call waiting for reply
+            RESEND      // message must be re-sent after a socket reconnect
         } state = SEND;
         uint32_t xid = 0;
         uint32_t seq = 0;
@@ -320,6 +321,24 @@ private:
     // Protects sendbuf_ and sender_
     std::mutex writeMutex_;
     std::unique_ptr<Message> sendbuf_;
+};
+
+/// A specialisation of StreamChannel which re-connects the channel if The
+/// remote endpoint is closed
+class ReconnectChannel: public StreamChannel
+{
+public:
+    ReconnectChannel(int sock, const AddressInfo& ai);
+
+    /// Reconnect the socket
+    void reconnect();
+
+    // Socket overrides
+    ssize_t send(const std::vector<iovec>& iov) override;
+    ssize_t recv(void* buf, size_t buflen) override;
+
+private:
+    AddressInfo addrinfo_;
 };
 
 /// Accept incoming connections to a socket and create instances of

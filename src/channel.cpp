@@ -104,7 +104,7 @@ std::shared_ptr<Channel> Channel::open(const AddressInfo& ai)
         throw std::system_error(errno, std::system_category());
     }
     if (ai.socktype == SOCK_STREAM) {
-        auto chan = std::make_shared<StreamChannel>(s);
+        auto chan = std::make_shared<ReconnectChannel>(s, ai);
         chan->connect(ai.addr);
         return chan;
     }
@@ -312,13 +312,31 @@ Channel::call(
                             << toMilliseconds(timeoutDuration) << "ms";
                     tx.state = Transaction::SLEEPING;
                     tx.cv.wait_for(lock, timeoutDuration);
+                    // If the channel was reconnected, we need to re-send
+                    if (tx.state == Transaction::RESEND) {
+                        VLOG(3) << "xid: " << xid
+                                << ": channel reconnected, resending";
+                        break;
+                    }
                     tx.state = Transaction::REPLY;
                 }
                 else {
                     running_ = true;
                     VLOG(3) << "xid: " << xid << ": waiting for reply: "
                             << toMilliseconds(timeoutDuration) << "ms";
-                    processIncomingMessage(tx, lock, timeoutDuration);
+                    try {
+                        processIncomingMessage(tx, lock, timeoutDuration);
+                    }
+                    catch (ResendMessage&) {
+                        running_ = false;
+                        VLOG(3) << "xid: " << xid
+                                << ": channel reconnected, resending";
+                        for (auto& i: pending_) {
+                            i.second->state = Transaction::RESEND;
+                            i.second->cv.notify_one();
+                        }
+                        break;
+                    }
                     running_ = false;
                 }
             }
@@ -333,6 +351,9 @@ Channel::call(
         pending_.erase(xid);
 
         if (!tx.body) {
+            // Socket reconnect - retransmit without timeout checking
+            if (tx.state == Transaction::RESEND)
+                continue;
             // We timed out waiting for a reply - retransmit
             now = clock_type::now();
             if (now >= maxTime) {
@@ -364,6 +385,7 @@ Channel::call(
                 case Transaction::AUTH:
                     break;
                 case Transaction::REPLY:
+                case Transaction::RESEND:
                     liveThreads++;
                     break;
                 case Transaction::SLEEPING:
@@ -421,7 +443,13 @@ bool Channel::processIncomingMessage(
                 << (tx.xid ? "client" : "server") << ")";
         lock.unlock();
         if (tman_) tman_->update(now);
-        body = receiveMessage(replyChan, stopPoint - now);
+        try {
+            body = receiveMessage(replyChan, stopPoint - now);
+        }
+        catch (ResendMessage&) {
+            lock.lock();
+            throw;
+        }
         lock.lock();
         if (body)
             break;
@@ -911,6 +939,56 @@ StreamChannel::releaseReceiveBuffer(std::unique_ptr<XdrSource>&& xdrs)
 {
     // XXX: rework the receive path to use standard sized buffers
     xdrs.reset();
+}
+
+ReconnectChannel::ReconnectChannel(int sock, const AddressInfo& ai)
+    : StreamChannel(sock),
+      addrinfo_(ai)
+{
+}
+
+ssize_t
+ReconnectChannel::send(const std::vector<iovec>& iov)
+{
+    for (;;) {
+        try {
+            auto bytes = StreamChannel::send(iov);
+            if (bytes == 0)
+                throw std::system_error(ENOTCONN, std::system_category());
+            return bytes;
+        }
+        catch (std::system_error&) {
+            reconnect();
+        }
+    }
+}
+
+ssize_t
+ReconnectChannel::recv(void* buf, size_t buflen)
+{
+    try {
+        auto bytes = StreamChannel::recv(buf, buflen);
+        if (bytes == 0)
+            throw std::system_error(ENOTCONN, std::system_category());
+        return bytes;
+    }
+    catch (std::system_error& e) {
+        reconnect();
+        throw ResendMessage();
+    }
+}
+
+void
+ReconnectChannel::reconnect()
+{
+    VLOG(2) << "reconnecting channel";
+    if (fd_ >= 0)
+        ::close(fd_);
+    fd_ = ::socket(addrinfo_.family, addrinfo_.socktype, addrinfo_.protocol);
+    if (fd_ < 0) {
+        throw std::system_error(errno, std::system_category());
+    }
+    connect(addrinfo_.addr);
 }
 
 bool
