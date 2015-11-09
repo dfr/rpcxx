@@ -2,6 +2,7 @@
 
 #include <unistd.h>
 #include <sys/select.h>
+#include <netinet/tcp.h>
 
 #include <glog/logging.h>
 
@@ -104,6 +105,8 @@ std::shared_ptr<Channel> Channel::open(const AddressInfo& ai)
         throw std::system_error(errno, std::system_category());
     }
     if (ai.socktype == SOCK_STREAM) {
+        int one = 1;
+        ::setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
         auto chan = std::make_shared<ReconnectChannel>(s, ai);
         chan->connect(ai.addr);
         return chan;
@@ -1005,6 +1008,8 @@ ListenSocket::onReadable(SocketManager* sockman)
     if (newsock < 0)
         throw std::system_error(errno, std::system_category());
     VLOG(3) << "New connection fd: " << newsock;
+    int one = 1;
+    ::setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     auto chan = std::make_shared<StreamChannel>(newsock, svcreg_);
     chan->setBufferSize(bufferSize_);
     sockman->add(chan);
