@@ -5,10 +5,18 @@
 #include <rpc++/channel.h>
 #include <rpc++/errors.h>
 #include <rpc++/gss.h>
+#include <glog/logging.h>
 
 using namespace oncrpc;
 using namespace oncrpc::_detail;
 using namespace std;
+
+void badSequence(uint32_t seq, uint32_t checkSeq)
+{
+    VLOG(1) << "Bad sequence number in reply:"
+            << " expected " << seq
+            << " received " << checkSeq;
+}
 
 namespace {
 

@@ -9,8 +9,6 @@
 #include <gssapi/gssapi.h>
 #endif
 
-#include <glog/logging.h>
-
 #include <rpc++/client.h>
 #include <rpc++/rpcsec_gss.h>
 
@@ -19,6 +17,9 @@ namespace oncrpc {
 namespace _detail {
 
 [[noreturn]] void reportError(gss_OID mech, uint32_t maj, uint32_t min);
+
+/// Log a bad sequence number
+void badSequence(uint32_t seq, uint32_t checkSeq);
 
 /// Decode a message body given the RPCSEC_GSS service and sequence
 /// number
@@ -57,9 +58,7 @@ bool decodeBody(
         xbody(&xm);
 
         if (checkSeq != seq) {
-            VLOG(1) << "Bad sequence number in reply:"
-                    << " expected " << seq
-                    << " received " << checkSeq;
+            badSequence(seq, checkSeq);
             return false;
         }
         break;
@@ -88,9 +87,7 @@ bool decodeBody(
         gss_release_buffer(&min_stat, &unwrappedBody);
 
         if (checkSeq != seq) {
-            VLOG(1) << "Bad sequence number in reply:"
-                    << " expected " << seq
-                    << " received " << checkSeq;
+            badSequence(seq, checkSeq);
             return false;
         }
         break;

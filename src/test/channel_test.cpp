@@ -6,6 +6,7 @@
 #include <rpc++/errors.h>
 #include <rpc++/server.h>
 #include <gtest/gtest.h>
+#include <glog/logging.h>
 
 using namespace oncrpc;
 using namespace std;

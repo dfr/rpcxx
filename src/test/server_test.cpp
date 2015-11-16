@@ -8,6 +8,7 @@
 #include <rpc++/server.h>
 #include <rpc++/xdr.h>
 #include <gtest/gtest.h>
+#include <glog/logging.h>
 
 using namespace oncrpc;
 using namespace std;

@@ -124,30 +124,11 @@ class CallContext
 public:
     CallContext(
         rpc_msg&& msg, std::unique_ptr<XdrSource> args,
-        std::shared_ptr<Channel> chan)
-        : size_(args->readSize()),
-          msg_(std::move(msg)),
-          args_(std::move(args)),
-          chan_(chan)
-    {
-    }
+        std::shared_ptr<Channel> chan);
 
-    CallContext(CallContext&& other)
-        : size_(other.size_),
-          msg_(std::move(other.msg_)),
-          gsscred_(std::move(other.gsscred_)),
-          args_(std::move(other.args_)),
-          chan_(std::move(other.chan_)),
-          svc_(std::move(other.svc_)),
-          client_(std::move(other.client_))
-    {
-    }
+    CallContext(CallContext&& other);
 
-    ~CallContext()
-    {
-        if (args_)
-            chan_->releaseReceiveBuffer(std::move(args_));
-    }
+    ~CallContext();
 
     size_t size() const { return size_; }
 
@@ -167,144 +148,35 @@ public:
     uint32_t proc() const { return msg_.cbody().proc; }
     GssCred& gsscred() { return gsscred_; }
 
-    void operator()()
-    {
-        try {
-            svc_(std::move(*this));
-        }
-        catch (RpcError& e) {
-            garbageArgs();
-        }
-    }
+    /// Call the service method, sending replies as necessary
+    void operator()();
 
-    template <typename F>
-    void getArgs(F&& fn)
-    {
-        if (client_) {
-            client_->getArgs(fn, gsscred_, args_.get());
-        }
-        else {
-            fn(static_cast<XdrSource*>(args_.get()));
-        }
-        chan_->releaseReceiveBuffer(std::move(args_));
-    }
+    /// Parse procedure arguments using the supplied function
+    void getArgs(std::function<void(XdrSource*)> fn);
 
-    template <typename F>
-    void sendReply(F&& fn)
-    {
-        accepted_reply areply;
-        if (!getVerifier(areply.verf))
-            return;
-        areply.stat = SUCCESS;
-        rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
-        auto reply = chan_->acquireSendBuffer();
-        xdr(reply_msg, reply.get());
-        if (client_) {
-            // RFC 2203: 5.3.3.4: If we get an error encoding the reply body,
-            // discard the reply.
-            if (!client_->sendReply(fn, gsscred_, reply.get())) {
-                chan_->releaseSendBuffer(std::move(reply));
-                return;
-            }
-        }
-        else {
-            fn(static_cast<XdrSink*>(reply.get()));
-        }
-        VLOG(3) << "xid: " << msg_.xid << ": sent reply";
-        chan_->sendMessage(std::move(reply));
-    }
+    /// Send a reply message with results encoded using the supplied function
+    void sendReply(std::function<void(XdrSink*)> fn);
 
-    void rpcMismatch()
-    {
-        rejected_reply rreply;
-        rreply.stat = RPC_MISMATCH;
-        rreply.rpc_mismatch.low = 2;
-        rreply.rpc_mismatch.high = 2;
-        rpc_msg reply_msg(msg_.xid, std::move(rreply));
-        auto reply = chan_->acquireSendBuffer();
-        xdr(reply_msg, reply.get());
-        VLOG(3) << "xid: " << msg_.xid << ": sent RPC_MISMATCH";
-        chan_->sendMessage(std::move(reply));
-    }
+    /// Send an RPC_MISMATCH reply
+    void rpcMismatch();
 
-    void garbageArgs()
-    {
-        accepted_reply areply;
-        if (!getVerifier(areply.verf))
-            return;
-        areply.stat = GARBAGE_ARGS;
-        rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
-        auto reply = chan_->acquireSendBuffer();
-        xdr(reply_msg, reply.get());
-        VLOG(3) << "xid: " << msg_.xid << ": sent GARBAGE_ARGS";
-        chan_->sendMessage(std::move(reply));
-    }
+    /// Send a GARBAGE_ARGS reply
+    void garbageArgs();
 
-    void procedureUnavailable()
-    {
-        accepted_reply areply;
-        if (!getVerifier(areply.verf))
-            return;
-        areply.stat = PROC_UNAVAIL;
-        rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
-        auto reply = chan_->acquireSendBuffer();
-        xdr(reply_msg, reply.get());
-        VLOG(3) << "xid: " << msg_.xid << ": sent PROC_UNAVAIL";
-        chan_->sendMessage(std::move(reply));
-    }
+    /// Send a PROC_UNAVAIL reply
+    void procedureUnavailable();
 
-    void programUnavailable()
-    {
-        accepted_reply areply;
-        if (!getVerifier(areply.verf))
-            return;
-        areply.stat = PROG_UNAVAIL;
-        rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
-        auto reply = chan_->acquireSendBuffer();
-        xdr(reply_msg, reply.get());
-        VLOG(3) << "xid: " << msg_.xid << ": sent PROG_UNAVAIL";
-        chan_->sendMessage(std::move(reply));
-    }
+    /// Send a PROG_UNAVAIL reply
+    void programUnavailable();
 
-    void versionMismatch(int low, int high)
-    {
-        accepted_reply areply;
-        if (!getVerifier(areply.verf))
-            return;
-        areply.stat = PROG_MISMATCH;
-        auto& mi = areply.mismatch_info;
-        mi.low = low;
-        mi.high = high;
-        rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
-        auto reply = chan_->acquireSendBuffer();
-        xdr(reply_msg, reply.get());
-        VLOG(3) << "xid: " << msg_.xid << ": sent PROG_MISMATCH";
-        chan_->sendMessage(std::move(reply));
-    }
+    /// Send a PROG_MISMATCH reply
+    void versionMismatch(int low, int high);
 
-    void authError(auth_stat stat)
-    {
-        rejected_reply rreply;
-        rreply.stat = AUTH_ERROR;
-        rreply.auth_error = stat;
-        rpc_msg reply_msg(msg_.xid, std::move(rreply));
-        auto reply = chan_->acquireSendBuffer();
-        xdr(reply_msg, reply.get());
-        VLOG(3) << "xid: " << msg_.xid << ": sent AUTH_ERROR";
-        chan_->sendMessage(std::move(reply));
-    }
+    /// Send an AUTH_ERROR reply
+    void authError(auth_stat stat);
 
 private:
-    bool getVerifier(opaque_auth& verf)
-    {
-        if (client_) {
-            return client_->getVerifier(*this, verf);
-        }
-        else {
-            verf = { AUTH_NONE, {} };
-            return true;
-        }
-    }
+    bool getVerifier(opaque_auth& verf);
 
     /// Size in bytes of the wire format message
     size_t size_;
