@@ -14,7 +14,12 @@ enum auth_flavor: uint32_t {
     AUTH_SYS   = 1,
     AUTH_SHORT = 2,
     AUTH_DH    = 3,
-    RPCSEC_GSS = 6
+    RPCSEC_GSS = 6,
+
+    // Pseudo flavors used to select different Kerberos options
+    RPCSEC_GSS_KRB5 = 390003,
+    RPCSEC_GSS_KRB5I = 390004,
+    RPCSEC_GSS_KRB5P = 390005
 };
 
 struct opaque_auth {
