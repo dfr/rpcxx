@@ -174,6 +174,9 @@ void ProgramVersion::printClientStubs(
     --indent;
     str << indent << "}" << endl;
 
+    str << indent << "auto channel() const { return channel_; }" << endl;
+    str << indent << "auto client() const { return client_; }" << endl;
+
     for (const auto& proc: *this) {
         proc->printDeclaration(
             indent, prefixlen, "", " override", str);
@@ -187,7 +190,7 @@ void ProgramVersion::printClientStubs(
     str << indent
         << "std::shared_ptr<oncrpc::Channel> channel_;" << endl
         << indent
-        << "std::shared_ptr<oncrpc::Client> client_;" << endl;
+        << "std::shared_ptr<CL> client_;" << endl;
     --indent;
     str << indent << "};" << endl << endl;
 }

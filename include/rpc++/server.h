@@ -8,7 +8,12 @@
 #include <unordered_set>
 #include <vector>
 
+#ifdef __APPLE__
+#include <pthread.h>
+#endif
+
 #include <rpc++/channel.h>
+#include <rpc++/cred.h>
 #include <rpc++/errors.h>
 #include <rpc++/gss.h>
 
@@ -30,6 +35,8 @@ public:
 namespace oncrpc {
 
 class CallContext;
+class Credential;
+class CredMapper;
 
 typedef std::function<void(CallContext&&)> Service;
 
@@ -54,7 +61,7 @@ private:
 class GssClientContext
 {
 public:
-    GssClientContext();
+    GssClientContext(std::shared_ptr<ServiceRegistry> svcreg);
     ~GssClientContext();
 
     void controlMessage(CallContext& ctx);
@@ -104,9 +111,18 @@ public:
         expiry_ = expiry;
     }
 
+    /// Return the client credential for this GSS-API context
+    const Credential& cred() const { return cred_; }
+
+    /// Return true if there is a client credential for this GSS-API context
+    bool haveCred() const { return haveCred_; }
+
 private:
+    void lookupCred();
+
     static uint32_t nextId_;    // XXX atomic?
 
+    std::weak_ptr<ServiceRegistry> svcreg_;
     uint32_t id_;
     std::mutex mutex_;
     bool established_ = false;
@@ -115,6 +131,8 @@ private:
     gss_ctx_id_t context_ = GSS_C_NO_CONTEXT;
     gss_name_t clientName_ = GSS_C_NO_NAME;
     gss_OID mechType_ = GSS_C_NO_OID;
+    bool haveCred_ = false;
+    Credential cred_;
 };
 
 }
@@ -129,6 +147,16 @@ public:
     CallContext(CallContext&& other);
 
     ~CallContext();
+
+    static CallContext& current()
+    {
+#ifdef __APPLE__
+        return *reinterpret_cast<CallContext*>(
+            pthread_getspecific(currentContextKey()));
+#else
+        return *currentContext_;
+#endif
+    }
 
     size_t size() const { return size_; }
 
@@ -148,6 +176,18 @@ public:
     uint32_t proc() const { return msg_.cbody().proc; }
     GssCred& gsscred() { return gsscred_; }
 
+    /// Get the user credentials for this rpc message, if any.
+    /// If there are no valid credentials, send an AUTH_TOOWEAK reply.
+    const Credential& cred();
+
+    /// Look up user credentials for this rpc message
+    void lookupCred();
+
+    /// Get the cred flavor for this rpc message. For RPCSEC_GSS, this is
+    /// the pseudo flavor, allowing the application to determine whether
+    /// privacy or integrity is in use.
+    auth_flavor flavor();
+
     /// Call the service method, sending replies as necessary
     void operator()();
 
@@ -163,6 +203,9 @@ public:
     /// Send a GARBAGE_ARGS reply
     void garbageArgs();
 
+    /// Send a SYSTEM_ERR reply
+    void systemError();
+
     /// Send a PROC_UNAVAIL reply
     void procedureUnavailable();
 
@@ -177,6 +220,22 @@ public:
 
 private:
     bool getVerifier(opaque_auth& verf);
+
+#ifdef __APPLE__
+    static pthread_key_t currentContextKey()
+    {
+        static pthread_key_t key;
+        static std::once_flag flag;
+        std::call_once(
+            flag,
+            [&]() {
+                pthread_key_create(&key, nullptr);
+            });
+        return key;
+    }
+#else
+    thread_local CallContext* currentContext_;
+#endif
 
     /// Size in bytes of the wire format message
     size_t size_;
@@ -198,9 +257,16 @@ private:
 
     /// RPCSEC_GSS client context
     std::shared_ptr<_detail::GssClientContext> client_;
+
+    /// Pointer to the credentials for this message, or nullptr if there are
+    /// none
+    const Credential* credptr_ = nullptr;
+
+    /// Storage for AUTH_SYS creds
+    Credential cred_;
 };
 
-class ServiceRegistry
+class ServiceRegistry: public std::enable_shared_from_this<ServiceRegistry>
 {
 public:
     ServiceRegistry();
@@ -226,6 +292,15 @@ public:
         clientLifetime_ = lifetime;
     }
 
+    /// Register a credential mapping for a Kerberos realm
+    void mapCredentials(
+        const std::string& realm, std::shared_ptr<CredMapper> map);
+
+    /// Lookup credentials for a user in some realm, returning true if the
+    /// user was found, false otherwise
+    bool lookupCred(
+        const std::string& user, const std::string& realm, Credential& cred);
+
 private:
     bool validateAuth(CallContext& ctx);
 
@@ -235,6 +310,7 @@ private:
     std::unordered_map<std::pair<uint32_t, uint32_t>, Service> services_;
     std::unordered_map<
         uint32_t, std::shared_ptr<_detail::GssClientContext>> clients_;
+    std::unordered_map<std::string, std::shared_ptr<CredMapper>> credmap_;
 };
 
 }

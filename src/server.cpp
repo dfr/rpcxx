@@ -5,6 +5,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 
+#include <rpc++/cred.h>
 #include <rpc++/errors.h>
 #include <rpc++/rpcproto.h>
 #include <rpc++/server.h>
@@ -57,8 +58,9 @@ SequenceWindow::valid(uint32_t seq)
 
 uint32_t GssClientContext::nextId_ = 0;
 
-GssClientContext::GssClientContext()
-    : id_(nextId_++),
+GssClientContext::GssClientContext(std::shared_ptr<ServiceRegistry> svcreg)
+    : svcreg_(svcreg),
+      id_(nextId_++),
       expiry_(std::chrono::system_clock::now() + 5min),
       sequenceWindow_(50)
 {
@@ -125,6 +127,8 @@ GssClientContext::controlMessage(CallContext& ctx)
             expiry_ = now + 24h;
         else
             expiry_ = now + std::chrono::seconds(credLifetime);
+
+        lookupCred();
     }
 
     ctx.sendReply([&res](XdrSink* xdrs) { xdr(res, xdrs); });
@@ -214,6 +218,33 @@ GssClientContext::getVerifier(CallContext& ctx, opaque_auth& verf)
     return true;
 }
 
+void GssClientContext::lookupCred()
+{
+    haveCred_ = false;
+
+    uint32_t maj_stat, min_stat;
+    gss_buffer_desc buf;
+    maj_stat = gss_display_name(&min_stat, clientName_, &buf, nullptr);
+    if (GSS_ERROR(maj_stat)) {
+        LOG(ERROR) << "failed to export GSS-API name to build cred";
+        return;
+    }
+    std::string name(reinterpret_cast<const char*>(buf.value), buf.length);
+    gss_release_buffer(&min_stat, &buf);
+    auto i = name.rfind('@');
+    if (i == std::string::npos) {
+        LOG(ERROR) << "expected '@' in principal name";
+        return;
+    }
+    auto user = name.substr(0, i);
+    auto realm = name.substr(i + 1);
+    VLOG(1) << "looking up credential for user: " << user
+            << " in realm: " << realm;
+
+    auto svcreg = svcreg_.lock();
+    haveCred_ = svcreg->lookupCred(user, realm, cred_);
+}
+
 CallContext::CallContext(
     rpc_msg&& msg, std::unique_ptr<XdrSource> args,
     std::shared_ptr<Channel> chan)
@@ -231,7 +262,9 @@ CallContext::CallContext(CallContext&& other)
       args_(std::move(other.args_)),
       chan_(std::move(other.chan_)),
       svc_(std::move(other.svc_)),
-      client_(std::move(other.client_))
+      client_(std::move(other.client_)),
+      credptr_(other.credptr_),
+      cred_(std::move(other.cred_))
 {
 }
 
@@ -241,14 +274,91 @@ CallContext::~CallContext()
         chan_->releaseReceiveBuffer(std::move(args_));
 }
 
+const Credential& CallContext::cred()
+{
+    if (credptr_)
+        return *credptr_;
+    authError(AUTH_TOOWEAK);
+    throw NoReply();
+}
+
+void CallContext::lookupCred()
+{
+    auto& cbody = msg_.cbody();
+    switch (cbody.cred.flavor) {
+    case AUTH_SYS: {
+        XdrMemory xdrmem(
+            const_cast<uint8_t*>(cbody.cred.auth_body.data()),
+            cbody.cred.auth_body.size());
+        XdrSource* xdrs = &xdrmem;
+        std::uint32_t stamp, uid, gid;
+        std::string machinename;
+        std::vector<uint32_t> gids;
+        xdr(stamp, xdrs);
+        xdr(machinename, xdrs);
+        xdr(uid, xdrs);
+        xdr(gid, xdrs);
+        xdr(gids, xdrs);
+        cred_ = Credential(uid, gid, std::move(gids));
+        credptr_ = &cred_;
+        break;
+    }
+
+    case RPCSEC_GSS:
+        if (client_->haveCred()) {
+            credptr_ = &client_->cred();
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+auth_flavor CallContext::flavor()
+{
+    auto& cbody = msg_.cbody();
+    if (cbody.cred.flavor == RPCSEC_GSS) {
+        // Hard-wire krb5 flavors
+        switch (gsscred_.service) {
+        case GssService::NONE:
+            return RPCSEC_GSS_KRB5;
+        case GssService::INTEGRITY:
+            return RPCSEC_GSS_KRB5I;
+        case GssService::PRIVACY:
+            return RPCSEC_GSS_KRB5P;
+        }
+    }
+    else {
+        return cbody.cred.flavor;
+    }
+}
+
 void CallContext::operator()()
 {
+#ifdef __APPLE__
+    pthread_setspecific(currentContextKey(), this);
+#else
+    currentContext_ = this;
+#endif
+
     try {
         svc_(std::move(*this));
     }
-    catch (RpcError& e) {
+    catch (XdrError& e) {
         garbageArgs();
     }
+    catch (NoReply&) {
+        // A service may throw this exception if it has already sent a reply
+        // message (e.g. for an authentication failure) and needs to suppress
+        // the normal reply mechanism in the rpcgen service stubs
+    }
+
+#ifdef __APPLE__
+    pthread_setspecific(currentContextKey(), nullptr);
+#else
+    currentContext_ = nullptr;
+#endif
 }
 
 void CallContext::getArgs(std::function<void(XdrSource*)> fn)
@@ -280,7 +390,15 @@ void CallContext::sendReply(std::function<void(XdrSink*)> fn)
         }
     }
     else {
-        fn(static_cast<XdrSink*>(reply.get()));
+        try {
+            fn(static_cast<XdrSink*>(reply.get()));
+        }
+        catch (XdrError&) {
+            LOG(ERROR) << "xid: " << msg_.xid
+                       << ": failed to encode reply body";
+            systemError();
+            return;
+        }
     }
     VLOG(3) << "xid: " << msg_.xid << ": sent reply";
     chan_->sendMessage(std::move(reply));
@@ -309,6 +427,19 @@ void CallContext::garbageArgs()
     auto reply = chan_->acquireSendBuffer();
     xdr(reply_msg, reply.get());
     VLOG(3) << "xid: " << msg_.xid << ": sent GARBAGE_ARGS";
+    chan_->sendMessage(std::move(reply));
+}
+
+void CallContext::systemError()
+{
+    accepted_reply areply;
+    if (!getVerifier(areply.verf))
+        return;
+    areply.stat = SYSTEM_ERR;
+    rpc_msg reply_msg(msg_.xid, reply_body(std::move(areply)));
+    auto reply = chan_->acquireSendBuffer();
+    xdr(reply_msg, reply.get());
+    VLOG(3) << "xid: " << msg_.xid << ": sent SYSTEM_ERR";
     chan_->sendMessage(std::move(reply));
 }
 
@@ -436,6 +567,7 @@ ServiceRegistry::process(CallContext&& ctx)
         // pool. Alternatively, the application can supply a service handler
         // which could defer execution to some other executor.
         ctx.setService(lookup(ctx.prog(), ctx.vers()));
+        ctx.lookupCred();
         ctx();
     }
     catch (ProgramUnavailable& e) {
@@ -464,6 +596,24 @@ void ServiceRegistry::clearClients()
 {
     std::unique_lock<std::mutex> lock(mutex_);
     clients_.clear();
+}
+
+void ServiceRegistry::mapCredentials(
+    const std::string& realm, std::shared_ptr<CredMapper> map)
+{
+    credmap_[realm] = std::move(map);
+}
+
+bool ServiceRegistry::lookupCred(
+    const std::string& user, const std::string& realm, Credential& cred)
+{
+    auto i = credmap_.find(realm);
+    if (i == credmap_.end()) {
+        LOG(ERROR) << "Unexpected realm: " << realm;
+        return false;
+    }
+    auto mapper = i->second;
+    return mapper->lookupCred(user, cred);
 }
 
 bool
@@ -574,7 +724,7 @@ ServiceRegistry::validateAuth(CallContext& ctx)
         }
         else {
             std::unique_lock<std::mutex> lock(mutex_);
-            client = std::make_shared<GssClientContext>();
+            client = std::make_shared<GssClientContext>(shared_from_this());
             clients_[client->id()] = client;
         }
         // fall through

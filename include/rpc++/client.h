@@ -8,6 +8,7 @@
 namespace oncrpc {
 
 class Channel;
+class Credential;
 class XdrSink;
 class XdrSource;
 class accepted_reply;
@@ -80,7 +81,11 @@ public:
         std::function<void(XdrSink*)> xargs, Protection prot,
         uint32_t& seq) override;
 
+    /// Set to the given client credential
+    void set(const Credential& cred);
+
 private:
+    std::string machinename_;
     std::vector<uint8_t> cred_;
 };
 

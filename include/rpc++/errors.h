@@ -55,6 +55,16 @@ public:
     }
 };
 
+/// Used to stop a pre-generated service from sending a reply
+class NoReply: public RpcError
+{
+public:
+    NoReply()
+        : RpcError("noreply")
+    {
+    }
+};
+
 /// MSG_ACCEPTED, PROG_UNAVAIL
 class ProgramUnavailable: public RpcError
 {

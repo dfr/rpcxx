@@ -2,6 +2,7 @@
 
 #include <rpc++/channel.h>
 #include <rpc++/client.h>
+#include <rpc++/cred.h>
 
 using namespace oncrpc;
 
@@ -110,23 +111,11 @@ SysClient::SysClient(uint32_t program, uint32_t version)
     char hostname[255];
     gethostname(hostname, 254);
     hostname[254] = '\0';
+    machinename_ = hostname;
 
-    std::vector<gid_t> gids;
-    gids.resize(getgroups(0, nullptr));
-    getgroups(gids.size(), gids.data());
-
-    authsys_parms parms;
-    parms.stamp = 0;
-    parms.machinename = hostname;
-    parms.uid = getuid();
-    parms.gid = getgid();
-    parms.gids.resize(gids.size());
-    std::copy(gids.begin(), gids.end(), parms.gids.begin());
-
-    cred_.resize(512);
-    auto xdrs = std::make_unique<XdrMemory>(cred_.data(), 512);
-    xdr(parms, static_cast<XdrSink*>(xdrs.get()));
-    cred_.resize(xdrs->writePos());
+    Credential cred;
+    cred.setToLocal();
+    set(cred);
 }
 
 bool
@@ -146,4 +135,20 @@ SysClient::processCall(
     xargs(xdrs);
     seq = 0;
     return true;
+}
+
+void
+SysClient::set(const Credential& cred)
+{
+    authsys_parms parms;
+    parms.stamp = 0;
+    parms.machinename = machinename_;
+    parms.uid = cred.uid();
+    parms.gid = cred.gid();
+    parms.gids = cred.gids();
+
+    cred_.resize(XdrSizeof(parms));
+    auto xdrs = std::make_unique<XdrMemory>(cred_.data(), cred_.size());
+    xdr(parms, static_cast<XdrSink*>(xdrs.get()));
+    assert(xdrs->writePos() == cred_.size());
 }

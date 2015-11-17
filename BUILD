@@ -14,6 +14,11 @@ cc_library(
     linkstatic = 1
 )
 
+test_suite(
+    name = "small",
+    tags = ["small"]
+)
+
 cc_test(
     name = "rpc_test",
     size = "small",

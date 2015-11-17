@@ -3,6 +3,7 @@
 
 #include <rpc++/channel.h>
 #include <rpc++/client.h>
+#include <rpc++/cred.h>
 #include <rpc++/server.h>
 #include <rpc++/socket.h>
 
