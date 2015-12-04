@@ -88,6 +88,14 @@ private:
 /// Similar to struct addrinfo but with C++ semantics for allocation
 struct AddressInfo
 {
+    AddressInfo()
+        : flags(0),
+          family(0),
+          socktype(0),
+          protocol(0)
+    {
+    }
+
     AddressInfo(addrinfo* ai);
     int flags;
     int family;
@@ -95,6 +103,8 @@ struct AddressInfo
     int protocol;
     Address addr;
     std::string canonname;
+
+    std::string uaddr() const;
 };
 
 std::vector<AddressInfo> getAddressInfo(

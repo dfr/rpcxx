@@ -226,6 +226,23 @@ std::vector<AddressInfo> oncrpc::getAddressInfo(
 std::vector<AddressInfo> oncrpc::getAddressInfo(
     const std::string& url, const std::string& netid)
 {
+    if (netid == "local") {
+        // Special case for local sockets
+        sockaddr_un sun;
+        sun.sun_family = AF_LOCAL;
+        std::copy_n(url.data(), url.size(), sun.sun_path);
+        sun.sun_path[url.size()] = '\0';
+        sun.sun_len = SUN_LEN(&sun);
+        AddressInfo ai;
+        ai.flags = 0;
+        ai.family = PF_LOCAL;
+        ai.socktype = SOCK_STREAM;
+        ai.protocol = 0;
+        ai.addr = Address(reinterpret_cast<sockaddr&>(sun));
+        std::vector<AddressInfo> res { ai };
+        return res;
+    }
+
     UrlParser p(url);
 
     auto host = p.host;
@@ -258,6 +275,61 @@ std::vector<AddressInfo> oncrpc::getAddressInfo(
     ::freeaddrinfo(res0);
 
     return addrs;
+}
+
+std::string AddressInfo::uaddr() const
+{
+    std::ostringstream ss;
+    if (family == AF_INET6) {
+        sockaddr_in6* sin6p = (sockaddr_in6*) addr.addr();
+        uint16_t* p = (uint16_t*) sin6p->sin6_addr.s6_addr;
+        std::vector<uint16_t> head, tail;
+        int i;
+        for (i = 0; i < 8; i++) {
+            if (p[i])
+                head.push_back(ntohs(p[i]));
+            else
+                break;
+        }
+        for (; i < 8 && p[i] == 0; i++)
+            ;
+        for (; i < 8; i++)
+            tail.push_back(ntohs(p[i]));
+        bool first = true;
+        ss << std::hex;
+        for (auto val: head) {
+            if (!first)
+                ss << ":";
+            first = false;
+            ss << val;
+        }
+        if (head.size() + tail.size() < 8) {
+            if (first)
+                ss << ":";
+            ss << ":";
+            first = false;
+        }
+        for (auto val: head) {
+            if (!first)
+                ss << ":";
+            first = false;
+            ss << val;
+        }
+        uint16_t port = ntohs(sin6p->sin6_port);
+        ss << std::dec << "." << (port >> 8) << "." << (port & 0xff);
+    }
+    else {
+        sockaddr_in* sinp = (sockaddr_in*) addr.addr();
+        uint8_t* p = (uint8_t*) &sinp->sin_addr;
+        ss << int(p[0]) << "."
+           << int(p[1]) << "."
+           << int(p[2]) << "."
+           << int(p[3]) << ".";
+        p = (uint8_t*) &sinp->sin_port;
+        ss << int(p[0]) << "."
+           << int(p[1]);
+    }
+    return ss.str();
 }
 
 AddressInfo oncrpc::uaddr2taddr(
