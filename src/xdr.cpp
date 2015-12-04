@@ -31,6 +31,16 @@ XdrMemory::XdrMemory(uint8_t* p, size_t sz)
     readLimit_ = buf_ + sz;
 }
 
+XdrMemory::XdrMemory(const uint8_t* p, size_t sz)
+{
+    size_ = sz;
+    buf_ = const_cast<uint8_t*>(p);
+    writeCursor_ = nullptr;
+    writeLimit_ = nullptr;
+    readCursor_ = buf_;
+    readLimit_ = buf_ + sz;
+}
+
 void
 XdrMemory::flush()
 {

@@ -677,6 +677,11 @@ public:
         : XdrMemory(reinterpret_cast<uint8_t*>(&s[0]), s.size())
     {
     }
+    XdrMemory(const uint8_t* p, size_t sz);
+    XdrMemory(const void* p, size_t sz)
+        : XdrMemory(static_cast<const uint8_t*>(p), sz)
+    {
+    }
 
     uint8_t* buf() const
     {

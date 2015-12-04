@@ -288,7 +288,7 @@ void CallContext::lookupCred()
     switch (cbody.cred.flavor) {
     case AUTH_SYS: {
         XdrMemory xdrmem(
-            const_cast<uint8_t*>(cbody.cred.auth_body.data()),
+            cbody.cred.auth_body.data(),
             cbody.cred.auth_body.size());
         XdrSource* xdrs = &xdrmem;
         std::uint32_t stamp, uid, gid;
@@ -639,7 +639,7 @@ ServiceRegistry::validateAuth(CallContext& ctx)
     // Decode and sanity check the creds
     try {
         XdrMemory xdrmem(
-            const_cast<uint8_t*>(cbody.cred.auth_body.data()),
+            cbody.cred.auth_body.data(),
             cbody.cred.auth_body.size());
         xdr(cred, static_cast<XdrSource*>(&xdrmem));
     }
