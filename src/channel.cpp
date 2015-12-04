@@ -63,6 +63,18 @@ Message::putBuffer(const std::shared_ptr<Buffer>& buf)
     }
     iov_.emplace_back(iovec{writeCursor_, 0});
     buffers_.push_back(buf);
+
+    size_t pad = __round(len) - len;
+    while (pad > 0) {
+        if (writeCursor_ == writeLimit_)
+            flush();
+        size_t n = writeLimit_ - writeCursor_;
+        if (n > pad)
+            n = pad;
+        std::fill_n(writeCursor_, n, 0);
+        writeCursor_ += n;
+        pad -= n;
+    }
 }
 
 void
