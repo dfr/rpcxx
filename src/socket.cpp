@@ -332,6 +332,36 @@ std::string AddressInfo::uaddr() const
     return ss.str();
 }
 
+std::string AddressInfo::netid() const
+{
+    if (family == AF_INET6) {
+        if (socktype == SOCK_STREAM)
+            return "tcp6";
+        else if (socktype == SOCK_DGRAM)
+            return "udp6";
+    }
+    else if (family == AF_INET) {
+        if (socktype == SOCK_STREAM)
+            return "tcp";
+        else if (socktype == SOCK_DGRAM)
+            return "udp";
+    }
+    return "";
+}
+
+int AddressInfo::port() const
+{
+    if (family == AF_INET6) {
+        sockaddr_in6* sin6p = (sockaddr_in6*) addr.addr();
+        return ntohs(sin6p->sin6_port);
+    }
+    else if (family == AF_INET) {
+        sockaddr_in* sinp = (sockaddr_in*) addr.addr();
+        return ntohs(sinp->sin_port);
+    }
+    return -1;
+}
+
 AddressInfo oncrpc::uaddr2taddr(
     const std::string& uaddr, const std::string& netid)
 {

@@ -105,6 +105,8 @@ struct AddressInfo
     std::string canonname;
 
     std::string uaddr() const;
+    std::string netid() const;
+    int port() const;
 };
 
 std::vector<AddressInfo> getAddressInfo(
