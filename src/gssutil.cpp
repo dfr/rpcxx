@@ -58,5 +58,13 @@ reportError(gss_OID mech, uint32_t maj, uint32_t min)
     throw RpcError(ss.str());
 }
 
+void badSequence(uint32_t seq, uint32_t checkSeq)
+{
+    std::ostringstream ss;
+    ss << "Bad RPCSEC_GSS sequence number: expected " << checkSeq
+       << ", received " << seq;
+    throw RpcError(ss.str());
+}
+
 }
 }

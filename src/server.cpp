@@ -15,6 +15,10 @@ using namespace oncrpc;
 using namespace oncrpc::_detail;
 using namespace std::literals::chrono_literals;
 
+#ifndef __APPLE__
+thread_local CallContext* CallContext::currentContext_;
+#endif
+
 SequenceWindow::SequenceWindow(int size)
     : size_(size),
       largestSeen_(0)

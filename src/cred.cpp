@@ -1,4 +1,5 @@
 #include <pwd.h>
+#include <unistd.h>
 
 #include <rpc++/cred.h>
 

@@ -234,7 +234,7 @@ private:
         return key;
     }
 #else
-    thread_local CallContext* currentContext_;
+    static thread_local CallContext* currentContext_;
 #endif
 
     /// Size in bytes of the wire format message

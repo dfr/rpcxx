@@ -63,9 +63,9 @@ typedef std::unique_ptr<rp__list> rpcblist_ptr; /* results of RPCBPROC_DUMP */
  * Arguments of remote calls
  */
 struct rpcb_rmtcallargs {
-    uint prog;                  /* program number */
-    uint vers;                  /* version number */
-    uint proc;                  /* procedure number */
+    uint32_t prog;              /* program number */
+    uint32_t vers;              /* version number */
+    uint32_t proc;              /* procedure number */
     std::vector<uint8_t> args;  /* argument */
 };
 
