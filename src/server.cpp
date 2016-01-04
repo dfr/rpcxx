@@ -73,6 +73,8 @@ GssClientContext::GssClientContext(std::shared_ptr<ServiceRegistry> svcreg)
 GssClientContext::~GssClientContext()
 {
     uint32_t min_stat;
+    if (clientName_)
+	gss_release_name(&min_stat, &clientName_);
     if (context_)
         gss_delete_sec_context(&min_stat, &context_, GSS_C_NO_BUFFER);
 }
