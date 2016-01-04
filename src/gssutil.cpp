@@ -44,6 +44,7 @@ reportError(gss_OID mech, uint32_t maj, uint32_t min)
         gss_release_buffer(&min_stat, &buf);
     } while (message_context);
     if (mech) {
+	ss << ", ";
         message_context = 0;
         do {
             maj_stat = gss_display_status(
@@ -55,6 +56,7 @@ reportError(gss_OID mech, uint32_t maj, uint32_t min)
             gss_release_buffer(&min_stat, &buf);
         } while (message_context);
     }
+    LOG(ERROR) << ss.str();
     throw RpcError(ss.str());
 }
 
