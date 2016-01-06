@@ -76,12 +76,23 @@ private:
 
 GssEnv* gssenv = new GssEnv;
 
+class FakeCredMapper: public CredMapper
+{
+public:
+    bool lookupCred(const std::string& name, Credential& cred) override
+    {
+	cred = Credential(1234, 5678, {}, false);
+	return true;
+    }
+};
+
 class GssTest: public ::testing::Test
 {
 public:
     GssTest()
         : svcreg(make_shared<ServiceRegistry>())
     {
+	svcreg->mapCredentials("TEST_REALM", make_shared<FakeCredMapper>());
         addTestService();
         ::setenv("KRB5_KTNAME", FLAGS_keytab.c_str(), true);
         ::setenv("KRB5_CONFIG", FLAGS_krb5config.c_str(), true);
