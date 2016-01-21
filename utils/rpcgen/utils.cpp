@@ -29,7 +29,7 @@ oncrpc::rpcgen::parseNamespaces(const string& namespaces)
             throw runtime_error(ss.str());
         }
     }
-    return move(res);
+    return res;
 }
 
 vector<string>
@@ -53,7 +53,7 @@ oncrpc::rpcgen::parseIdentifier(const string& identifier)
     }
     if (word.size() > 0)
         res.push_back(move(word));
-    return move(res);
+    return res;
 }
 
 std::string
