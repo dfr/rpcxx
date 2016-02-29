@@ -91,36 +91,41 @@ Parser::voidType()
 shared_ptr<Specification>
 Parser::parse()
 {
-    auto spec = make_shared<Specification>();
+    spec_ = make_shared<Specification>();
 
     while (tok_.type() != Token::END_OF_FILE) {
         switch (tok_.type()) {
         case Token::KCONST:
-            spec->add(parseConstantDefinition());
+            spec_->add(parseConstantDefinition());
             break;
-        case Token::KTYPEDEF:
+        case Token::KTYPEDEF: {
             nextToken();
-            spec->add(make_shared<TypeDefinition>(parseDeclaration()));
+	    auto decl = parseDeclaration();
+	    spec_->addTypeAlias(decl.first, decl.second);
+            spec_->add(make_shared<TypeDefinition>(move(decl)));
             expectToken(';');
             break;
+	}
         case Token::KENUM:
-            spec->add(parseEnumDefinition());
+            spec_->add(parseEnumDefinition());
             break;
         case Token::KSTRUCT:
-            spec->add(parseStructDefinition());
+            spec_->add(parseStructDefinition());
             break;
         case Token::KUNION:
-            spec->add(parseUnionDefinition());
+            spec_->add(parseUnionDefinition());
             break;
         case Token::KPROGRAM:
-            spec->add(parseProgramDefinition());
+            spec_->add(parseProgramDefinition());
             break;
         default:
             unexpected();
         }
     }
 
-    return spec;
+    auto res = spec_;
+    spec_.reset();
+    return res;
 }
 
 shared_ptr<ConstantDefinition>
@@ -222,7 +227,7 @@ Parser::parseStructBody()
         case Token::KSTRUCT:
         case Token::KUNION:
         case Token::IDENTIFIER:
-            res->add(move(parseDeclaration()));
+            res->add(parseDeclaration());
             expectToken(';');
             break;
         default:
@@ -230,7 +235,7 @@ Parser::parseStructBody()
         }
     } while (tok_.type() != '}');
     nextToken();
-    return move(res);
+    return res;
 }
 
 shared_ptr<UnionDefinition>
@@ -342,7 +347,11 @@ Parser::parseTypeSpecifier()
     case Token::IDENTIFIER: {
         auto name = tok_.svalue();
         nextToken();
-        return make_shared<NamedType>(name);
+	auto ty = spec_->lookupTypeAlias(name);
+	if (ty)
+	    return make_shared<TypeAlias>(name, ty);
+	else
+	    return make_shared<NamedType>(name);
     }
     }
     unexpected();

@@ -17,6 +17,9 @@ public:
         std::vector<uint32_t>&& gids,
         bool privileged = false);
 
+    /// Copy constructor
+    Credential(const Credential& other);
+
     /// Move constructor
     Credential(Credential&& other);
 

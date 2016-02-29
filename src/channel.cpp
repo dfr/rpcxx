@@ -61,20 +61,15 @@ Message::putBuffer(const std::shared_ptr<Buffer>& buf)
     else {
         *iovp = iovec{p, len};
     }
-    iov_.emplace_back(iovec{writeCursor_, 0});
     buffers_.push_back(buf);
 
     size_t pad = __round(len) - len;
-    while (pad > 0) {
-        if (writeCursor_ == writeLimit_)
-            flush();
-        size_t n = writeLimit_ - writeCursor_;
-        if (n > pad)
-            n = pad;
-        std::fill_n(writeCursor_, n, 0);
-        writeCursor_ += n;
-        pad -= n;
+    if (pad > 0) {
+        refBytes_ += pad;
+        iov_.emplace_back(iovec{pad_, pad});
     }
+
+    iov_.emplace_back(iovec{writeCursor_, 0});
 }
 
 void
@@ -543,6 +538,7 @@ bool Channel::processIncomingMessage(
         lock.unlock();
         svcreg_->process(
             CallContext(std::move(msg), std::move(body), replyChan));
+        lock.lock();
         return true;
     }
 
@@ -995,7 +991,8 @@ StreamChannel::releaseReceiveBuffer(std::unique_ptr<XdrSource>&& xdrs)
 
 ReconnectChannel::ReconnectChannel(int sock, const AddressInfo& ai)
     : StreamChannel(sock),
-      addrinfo_(ai)
+      addrinfo_(ai),
+      reconnectCallback_([](){})
 {
 }
 
@@ -1036,11 +1033,22 @@ ReconnectChannel::reconnect()
     VLOG(2) << "reconnecting channel";
     if (fd_ >= 0)
         ::close(fd_);
-    fd_ = ::socket(addrinfo_.family, addrinfo_.socktype, addrinfo_.protocol);
-    if (fd_ < 0) {
-        throw std::system_error(errno, std::system_category());
+    try {
+        fd_ = ::socket(
+            addrinfo_.family, addrinfo_.socktype, addrinfo_.protocol);
+        if (fd_ < 0)
+            throw std::system_error(errno, std::system_category());
+        connect(addrinfo_.addr);
     }
-    connect(addrinfo_.addr);
+    catch (std::system_error& e) {
+        VLOG(2) << "reconnect failed: " << e.what();
+        if (fd_ >= 0) {
+            ::close(fd_);
+            fd_ = -1;
+        }
+        throw;
+    }
+    reconnectCallback_();
 }
 
 bool
@@ -1055,7 +1063,8 @@ ListenSocket::onReadable(SocketManager* sockman)
     int one = 1;
     ::setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     auto chan = std::make_shared<StreamChannel>(newsock, svcreg_);
+    chan->setCloseOnIdle(true);
     chan->setBufferSize(bufferSize_);
-    sockman->add(chan, true);
+    sockman->add(chan);
     return true;
 }

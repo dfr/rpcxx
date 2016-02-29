@@ -5,6 +5,7 @@
 #include <cassert>
 #include <exception>
 #include <istream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -497,6 +498,19 @@ public:
         definitions_.emplace_back(move(defn));
     }
 
+    void addTypeAlias(const string& name, shared_ptr<Type> type)
+    {
+	typeAliases_[name] = type;
+    }
+
+    shared_ptr<Type> lookupTypeAlias(const string& name)
+    {
+	auto i = typeAliases_.find(name);
+	if (i == typeAliases_.end())
+	    return nullptr;
+	return i->second;
+    }
+
     int operator==(const Specification& other) const
     {
         if (definitions_.size() != other.definitions_.size())
@@ -510,6 +524,7 @@ public:
 
 private:
     vector<shared_ptr<Definition>> definitions_;
+    map<string, shared_ptr<Type>> typeAliases_;
 };
 
 static inline ostream& operator<<(ostream& str, const Specification& obj)
@@ -549,6 +564,7 @@ private:
 
     Lexer lexer_;
     Token tok_;
+    shared_ptr<Specification> spec_;
 
     static unordered_map<int, shared_ptr<Type>> signedIntTypes_;
     static unordered_map<int, shared_ptr<Type>> unsignedIntTypes_;

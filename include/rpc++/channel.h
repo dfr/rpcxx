@@ -46,6 +46,7 @@ public:
         writeLimit_ = buf_ + size_;
         iov_.clear();
         iov_.emplace_back(iovec{writeCursor_, 0});
+        buffers_.clear();
     }
 
     /// Advance the write cursor. Typically used after reading into the buffer
@@ -58,6 +59,25 @@ public:
 
     auto iov() const { return iov_; }
 
+    void copyTo(XdrSink* xdrs)
+    {
+        int j = 0;
+        auto iovp = &iov_[0];
+        for (int i = 0; i < int(iov_.size()); i++) {
+            if (j < buffers_.size() && buffers_[j]->data() == iovp->iov_base) {
+                xdrs->putBuffer(buffers_[j]);
+                j++;
+            }
+            else if (iovp->iov_base == pad_) {
+                // Skip - putBuffer above handles this
+            }
+            else {
+                xdrs->putBytes(iovp->iov_base, iovp->iov_len);
+            }
+	    iovp++;
+        }
+    }
+
     // XdrSink overrides
     void putBuffer(const std::shared_ptr<Buffer>& buf) override;
     void flush() override;
@@ -67,6 +87,7 @@ public:
     void fill() override;
 
 private:
+    uint8_t pad_[4] = {0,0,0,0};
     std::vector<iovec> iov_;
     std::vector<std::shared_ptr<Buffer>> buffers_;
     size_t refBytes_ = 0;
@@ -156,6 +177,27 @@ public:
 
     /// Set the channel buffer size
     void setBufferSize(size_t sz) { bufferSize_ = sz; }
+
+    /// Return the channel's service registry, if any
+    std::shared_ptr<ServiceRegistry> serviceRegistry() const
+    {
+        return svcreg_;
+    }
+
+    /// Set the service registry to use for handlng calls on this
+    /// channel
+    void setServiceRegistry(std::shared_ptr<ServiceRegistry> svcreg)
+    {
+	svcreg_ = svcreg;
+    }
+
+    /// For server-side channels, set a flag to control whether to
+    /// close the channel when idle.
+    virtual void setCloseOnIdle(bool closeOnIdle) {}
+
+    /// Register a callback which is called if the channel is
+    /// re-connected to the remote endpoint.
+    virtual void onReconnect(std::function<void()> cb) {}
 
 protected:
 
@@ -258,6 +300,12 @@ public:
     SocketChannel(int sock);
     SocketChannel(int sock, std::shared_ptr<ServiceRegistry>);
 
+    // Channel overrides
+    void setCloseOnIdle(bool closeOnIdle) override
+    {
+	Socket::setCloseOnIdle(closeOnIdle);
+    }
+
     // Socket overrides
     bool onReadable(SocketManager* sockman) override;
 };
@@ -338,12 +386,19 @@ public:
     /// Reconnect the socket
     void reconnect();
 
+    // Channel overrides
+    void onReconnect(std::function<void()> cb) override
+    {
+        reconnectCallback_ = cb;
+    }
+
     // Socket overrides
     ssize_t send(const std::vector<iovec>& iov) override;
     ssize_t recv(void* buf, size_t buflen) override;
 
 private:
     AddressInfo addrinfo_;
+    std::function<void()> reconnectCallback_;
 };
 
 /// Accept incoming connections to a socket and create instances of

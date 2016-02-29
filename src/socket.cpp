@@ -46,9 +46,10 @@ struct UrlParser
         if (!std::isalpha(s[0]))
             throw RpcError("malformed url");
         while (s.size() > 0 && s[0] != ':') {
-            if (!std::isalpha(s[0]))
-                throw RpcError("malformed url");
-            scheme += s[0];
+	    auto ch = s[0];
+            if (!std::isalnum(ch) && ch != '+' && ch != '.' && ch != '-')
+                throw std::runtime_error("malformed url");
+            scheme += ch;
             s = s.substr(1);
         }
         if (s.size() == 0 || s[0] != ':')
@@ -255,11 +256,11 @@ std::vector<AddressInfo> oncrpc::getAddressInfo(
     hints.ai_socktype = std::get<1>(nt);
     if (std::isdigit(p.host[0])) {
         hints.ai_flags = AI_NUMERICHOST;
-        hints.ai_flags = PF_INET;
+        hints.ai_family = PF_INET;
     }
     else if (p.host[0] == '[') {
         hints.ai_flags = AI_NUMERICHOST;
-        hints.ai_flags = PF_INET6;
+        hints.ai_family = PF_INET6;
         host = host.substr(1, host.size() - 2);
     }
     int err = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &res0);
@@ -410,19 +411,19 @@ SocketManager::~SocketManager()
 }
 
 void
-SocketManager::add(std::shared_ptr<Socket> sock, bool closeOnIdle)
+SocketManager::add(std::shared_ptr<Socket> sock)
 {
-    VLOG(3) << "adding socket " << sock->fd();
+    VLOG(3) << "adding socket " << sock;
     std::unique_lock<std::mutex> lock(mutex_);
-    sockets_[sock->fd()] = entry{sock, clock_type::now(), closeOnIdle};
+    sockets_[sock] = clock_type::now();
 }
 
 void
 SocketManager::remove(std::shared_ptr<Socket> sock)
 {
-    VLOG(3) << "removing socket " << sock->fd();
+    VLOG(3) << "removing socket " << sock;
     std::unique_lock<std::mutex> lock(mutex_);
-    sockets_.erase(sock->fd());
+    sockets_.erase(sock);
 }
 
 void
@@ -438,12 +439,13 @@ SocketManager::run()
         FD_ZERO(&rset);
         FD_SET(pipefds_[0], &rset);
         for (const auto& i: sockets_) {
-            if (i.second.closeOnIdle && i.second.active < idleLimit) {
-                VLOG(3) << "idle timeout for socket " << i.second.socket->fd();
-                idle.push_back(i.second.socket);
+            if (i.first->closeOnIdle() &&
+		i.second < idleLimit) {
+                VLOG(3) << "idle timeout for socket " << i.first->fd();
+                idle.push_back(i.first);
                 continue;
             }
-            int fd = i.first;
+            int fd = i.first->fd();
             maxfd = std::max(maxfd, fd);
             FD_SET(fd, &rset);
         }
@@ -490,9 +492,9 @@ SocketManager::run()
 
         std::vector<std::shared_ptr<Socket>> ready;
         for (auto& i: sockets_) {
-            if (FD_ISSET(i.first, &rset)) {
-                i.second.active = now;
-                ready.push_back(i.second.socket);
+            if (FD_ISSET(i.first->fd(), &rset)) {
+                i.second = now;
+                ready.push_back(i.first);
             }
         }
         lock.unlock();

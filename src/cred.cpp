@@ -21,6 +21,14 @@ Credential::Credential(
 {
 }
 
+Credential::Credential(const Credential& other)
+    : uid_(other.uid_),
+      gid_(other.gid_),
+      gids_(other.gids_),
+      privileged_(other.privileged_)
+{
+}
+
 Credential::Credential(Credential&& other)
     : uid_(other.uid_),
       gid_(other.gid_),

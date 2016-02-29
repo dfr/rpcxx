@@ -19,6 +19,12 @@ public:
     virtual void print(Indent indent, ostream& str) const = 0;
     virtual void forwardDeclarations(Indent indent, ostream& str) const {}
 
+    /// Strip type aliases
+    virtual const Type* underlyingType() const
+    {
+	return this;
+    }
+
     string name() const
     {
         ostringstream ss;
@@ -38,6 +44,42 @@ static inline ostream& operator<<(ostream& str, const Type& obj)
     obj.print(Indent(), str);
     return str;
 }
+
+class TypeAlias: public Type
+{
+public:
+    TypeAlias(const string& name, shared_ptr<Type> ty)
+        : name_(name), ty_(ty)
+    {
+    }
+
+    bool isPOD() const override
+    {
+	return ty_->isPOD();
+    }
+
+    void print(Indent indent, ostream& str) const override
+    {
+        str << name_;
+    }
+
+    const Type* underlyingType() const override
+    {
+	return ty_.get();
+    }
+
+    int operator==(const Type& other) const override
+    {
+        auto p = dynamic_cast<const TypeAlias*>(&other);
+	if (p)
+	    return name_ == p->name_;
+	return *ty_->underlyingType() == *other.underlyingType();
+    }
+
+protected:
+    string name_;
+    shared_ptr<Type> ty_;
+};
 
 class NamedType: public Type
 {
@@ -60,7 +102,7 @@ public:
 
     int operator==(const Type& other) const override
     {
-        auto p = dynamic_cast<const NamedType*>(&other);
+        auto p = dynamic_cast<const NamedType*>(other.underlyingType());
         if (p)
             return name_ == p->name_;
         return false;
@@ -311,7 +353,9 @@ public:
     {
         auto p = dynamic_cast<const OpaqueType*>(&other);
         if (p)
-            return *size_.get() == *p->size_.get() && isFixed_ == p->isFixed_;
+            return (((size_ == nullptr && p->size_ == nullptr)
+		     || *size_.get() == *p->size_.get())
+		    && isFixed_ == p->isFixed_);
         return false;
     }
 
@@ -700,10 +744,9 @@ public:
         str << indent << "}" << endl;
     }
 
-    void checkDiscriminant(
-        Indent indent, const ValueList& values, ostream& str) const
+    void discriminantOk(const ValueList& values, ostream& str) const
     {
-        str << indent << "assert(";
+        str << "(";
         bool first = true;
         if (values.size() > 0) {
             for (const auto& val: values) {
@@ -723,7 +766,15 @@ public:
                 first = false;
             }
         }
-        str << ");" << endl;
+        str << ")";
+    }
+
+    void checkDiscriminant(
+        Indent indent, const ValueList& values, ostream& str) const
+    {
+        str << indent << "assert";
+	discriminantOk(values, str);
+        str << ";" << endl;
     }
 
     void printFields(Indent indent, const string& name, ostream& str) const
@@ -751,28 +802,59 @@ public:
         --indent;
         str << indent << "}" << endl;
 
-        // Type-specific constructors
-        for (const auto& field: fields_) {
-            if (field.decl_.first.size() == 0) {
-                // For void valued fields, just save the discriminant
-                str << indent << name << "(" << *discriminant_.second
-                    << " _discriminant)" << endl;
-                ++indent;
-                str << indent << ": " << discriminant_.first
-                    << "(_discriminant) {" << endl;
-                checkDiscriminant(indent, field.values_, str);
-                str << indent << "_hasValue = true;" << endl;
-                --indent;
-                str << indent << "}" << endl;
-            }
+        // Type-specific constructors. We need to make sure we only
+        // emit one constructor if there is more than one field with
+        // the same type.
+	vector<bool> handled(fields_.size(), false);
+	for (size_t i = 0; i < fields_.size(); i++) {
+	    if (handled[i])
+		continue;
+	    auto& field = fields_[i];
+	    handled[i] = true;
+	    if (field.decl_.first.size() == 0) {
+		str << indent << name << "(" << *discriminant_.second
+		    << " _discriminant)" << endl;
+		++indent;
+		str << indent << ": " << discriminant_.first
+		    << "(_discriminant) {" << endl;
+		str << indent << "assert(";
+		discriminantOk(field.values_,str);
+		for (size_t j = i + 1; j < fields_.size(); j++) {
+		    if (handled[j])
+			continue;
+		    auto& field2 = fields_[j];
+		    if (field2.decl_.first.size() == 0) {
+			str << endl << indent << "|| ";
+			discriminantOk(field2.values_, str);
+			handled[j] = true;
+		    }
+		}
+		str << ");" << endl;
+		str << indent << "_hasValue = true;" << endl;
+		--indent;
+		str << indent << "}" << endl;
+	    }
             else {
+		ValueList values;
+		for (auto v: field.values_)
+		    values.add(move(v));
+		for (size_t j = i + 1; j < fields_.size(); j++) {
+		    if (handled[j])
+			continue;
+		    auto& field2 = fields_[j];
+		    if (*field.decl_.second == *field2.decl_.second) {
+			for (auto v: field2.values_)
+			    values.add(move(v));
+			handled[j] = true;
+		    }
+		}
                 str << indent << name << "(" << *discriminant_.second
                     << " _discriminant, "
                     << *field.decl_.second << "&& _value)" << endl;
                 ++indent;
                 str << indent << ": " << discriminant_.first
                     << "(_discriminant) {" << endl;
-                checkDiscriminant(indent, field.values_, str);
+                checkDiscriminant(indent, values, str);
                 str << indent << "new (&_storage) "
                     << *field.decl_.second << "(std::move(_value));" << endl;
                 str << indent << "_hasValue = true;" << endl;

@@ -128,7 +128,7 @@ public:
     SocketManager();
     ~SocketManager();
 
-    void add(std::shared_ptr<Socket> conn, bool closeOnIdle = false);
+    void add(std::shared_ptr<Socket> conn);
 
     void remove(std::shared_ptr<Socket> conn);
 
@@ -144,16 +144,11 @@ public:
         clock_type::time_point when, std::function<void()> what) override;
 
 private:
-    struct entry {
-        std::shared_ptr<Socket> socket;
-        clock_type::time_point active;      // time last active
-        bool closeOnIdle;
-    };
-
     std::mutex mutex_;
     bool running_ = false;
     bool stopping_ = false;
-    std::unordered_map<int, entry> sockets_;
+    std::unordered_map<
+        std::shared_ptr<Socket>, clock_type::time_point> sockets_;
     int pipefds_[2];
     clock_type::duration idleTimeout_;
 };
@@ -181,6 +176,15 @@ public:
 
     /// Close the socket
     void close();
+
+    /// Return the close-on-idle flag for the socket
+    bool closeOnIdle() const { return closeOnIdle_; }
+
+    /// Set the close-on-idle flag for the socket
+    virtual void setCloseOnIdle(bool closeOnIdle)
+    {
+	closeOnIdle_ = closeOnIdle;
+    }
 
     /// Return the OS file descriptor for the socket
     int fd() const { return fd_; }
@@ -269,6 +273,7 @@ public:
 
 protected:
     int fd_;
+    bool closeOnIdle_ = false;
 };
 
 }

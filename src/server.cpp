@@ -237,6 +237,20 @@ GssClientContext::getVerifier(CallContext& ctx, opaque_auth& verf)
     return true;
 }
 
+std::string GssClientContext::principal() const
+{
+    uint32_t maj_stat, min_stat;
+    gss_buffer_desc buf;
+    maj_stat = gss_display_name(&min_stat, clientName_, &buf, nullptr);
+    if (GSS_ERROR(maj_stat)) {
+        LOG(FATAL) << "failed to export GSS-API name to build cred";
+        return "nobody@unknown";
+    }
+    std::string name(reinterpret_cast<const char*>(buf.value), buf.length);
+    gss_release_buffer(&min_stat, &buf);
+    return name;
+}
+
 void GssClientContext::lookupCred()
 {
     haveCred_ = false;

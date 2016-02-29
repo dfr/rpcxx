@@ -111,6 +111,9 @@ public:
         expiry_ = expiry;
     }
 
+    /// Return the client principal name for this GSS-API context
+    std::string principal() const;
+
     /// Return the client credential for this GSS-API context
     const Credential& cred() const { return cred_; }
 
@@ -175,6 +178,16 @@ public:
     uint32_t vers() const { return msg_.cbody().vers; }
     uint32_t proc() const { return msg_.cbody().proc; }
     GssCred& gsscred() { return gsscred_; }
+    auto channel() const { return chan_; }
+
+    /// Get the client principal name for this rpc message, if any
+    std::string principal() const
+    {
+	if (client_)
+	    return client_->principal();
+	else
+	    return "none@unknown";
+    }
 
     /// Get the user credentials for this rpc message, if any.
     /// If there are no valid credentials, send an AUTH_TOOWEAK reply.
