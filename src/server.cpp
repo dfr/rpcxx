@@ -1,4 +1,6 @@
 #include <cassert>
+#include <iomanip>
+#include <sstream>
 #include <system_error>
 
 #include <unistd.h>
@@ -175,7 +177,8 @@ GssClientContext::verifyCall(CallContext& ctx)
     uint32_t seq = ctx.gsscred().sequence;
     sequenceWindow_.update(seq);
     if (!sequenceWindow_.valid(seq)) {
-	VLOG(2) << "out of sequence window xid: " << ctx.msg().xid;
+	VLOG(2) << "out of sequence window xid: " << ctx.msg().xid
+		<< ", sequence: " << seq;
         return false;
     }
 
@@ -221,6 +224,16 @@ GssClientContext::getVerifier(CallContext& ctx, opaque_auth& verf)
     copy_n(static_cast<uint8_t*>(mic.value), mic.length,
            verf.auth_body.begin());
     gss_release_buffer(&min_stat, &mic);
+
+    if (VLOG_IS_ON(3)) {
+	using namespace std;
+	ostringstream ss;
+	ss << hex << setw(2) << setfill('0');
+	for (auto b: verf.auth_body)
+	    ss << int(b);
+	VLOG(3) << "reply verifier: " << ss.str();
+    }
+
     return true;
 }
 

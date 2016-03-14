@@ -369,6 +369,13 @@ GssClient::processReply(
         return false;
 
     VLOG(3) << "verifying reply for gen: " << gen << ", sequence: " << seq;
+    if (VLOG_IS_ON(3)) {
+	ostringstream ss;
+	ss << hex << setw(2) << setfill('0');
+	for (auto b: verf.auth_body)
+	    ss << int(b);
+	VLOG(3) << "received verifier: " << ss.str();
+    }
     XdrWord seqbuf(seq);
     gss_buffer_desc buf { sizeof(seqbuf), &seqbuf };
     gss_buffer_desc mic { verf.auth_body.size(), verf.auth_body.data() };

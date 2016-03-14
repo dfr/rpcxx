@@ -269,6 +269,8 @@ Channel::call(
 {
     int nretries = 0;
     auto retransmitInterval = retransmitInterval_;
+    if (retransmitInterval.count() == 0)
+	retransmitInterval = timeout;
 
     uint32_t xid;
     Transaction tx;
@@ -304,9 +306,14 @@ Channel::call(
 
         // XXX support oneway
 
+	auto sendTime = now;
         tx.timeout  = now + retransmitInterval;
         if (tx.timeout > maxTime)
             tx.timeout = maxTime;
+	VLOG(3) << "retransmit in "
+		<< std::chrono::duration_cast<
+		    std::chrono::milliseconds>(retransmitInterval).count()
+		<< "ms";
 
         // Loop waiting for replies until we either get a matching
         // reply message or we time out
@@ -316,7 +323,11 @@ Channel::call(
             assert(lock);
             if (!tx.body) {
                 if (now >= tx.timeout) {
-                    VLOG(3) << "xid: " << xid << " timeout";
+		    auto delta =
+			std::chrono::duration_cast<
+			std::chrono::milliseconds>(now - sendTime);
+                    VLOG(3) << "xid: " << xid << " timeout: "
+			    << delta.count() << "ms";
                     break;
                 }
                 auto timeoutDuration = tx.timeout - now;
@@ -373,6 +384,7 @@ Channel::call(
             now = clock_type::now();
             if (now >= maxTime) {
                 // XXX wakeup pending threads here?
+		VLOG(2) << "xid: " << xid << ": timeout";
                 throw TimeoutError();
             }
             VLOG(3) << "xid: " << xid << ": retransmitting";
@@ -429,8 +441,23 @@ Channel::call(
         }
 
         lock.unlock();
-        if (processReply(client, proc, tx, prot, gen, xresults))
-            break;
+	try {
+	    if (processReply(client, proc, tx, prot, gen, xresults))
+		break;
+	}
+	catch (GssError& e) {
+	    // If we get a GSS-API exception processing the reply,
+	    // just ignore the reply message. In the case where we
+	    // retransmitted but received the reply from the first
+	    // transmission, we will get an exception due to the
+	    // sequence number mismatch.
+	    //
+	    // In theory, we should be able to just wait for the
+	    // correct reply to turn up but at this point, we have
+	    // lost the state for the original message. Instead, we
+	    // re-send again with a brand new XID and sequence number.
+	    LOG(ERROR) << "GSS-API error processing reply: resending";
+	}
         lock.lock();
         tx.body.reset();
     }
@@ -610,6 +637,9 @@ LocalChannel::LocalChannel(std::shared_ptr<ServiceRegistry> svcreg)
     : Channel(svcreg),
       replyChannel_(std::make_shared<ReplyChannel>(this))
 {
+    // Disable retransmits - we never drop messages so we don't need
+    // retransmits
+    retransmitInterval_ = std::chrono::seconds(0);
 }
 
 std::unique_ptr<XdrSink>
@@ -841,6 +871,8 @@ DatagramChannel::releaseReceiveBuffer(std::unique_ptr<XdrSource>&& xdrs)
 StreamChannel::StreamChannel(int sock)
     : SocketChannel(sock)
 {
+    // Disable retransmits - we assume the stream protocol is reliable
+    retransmitInterval_ = std::chrono::seconds(0);
 }
 
 StreamChannel::StreamChannel(int sock, std::shared_ptr<ServiceRegistry> svcreg)

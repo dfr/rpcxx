@@ -57,7 +57,7 @@ reportError(gss_OID mech, uint32_t maj, uint32_t min)
         } while (message_context);
     }
     LOG(ERROR) << ss.str();
-    throw RpcError(ss.str());
+    throw GssError(ss.str());
 }
 
 void badSequence(uint32_t seq, uint32_t checkSeq)

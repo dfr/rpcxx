@@ -65,6 +65,16 @@ public:
     }
 };
 
+/// Used to report GSS-API errors generated when validating replies
+class GssError: public RpcError
+{
+public:
+    GssError(const std::string& what)
+	: RpcError(what)
+    {
+    }
+};
+
 /// MSG_ACCEPTED, PROG_UNAVAIL
 class ProgramUnavailable: public RpcError
 {
