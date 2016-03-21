@@ -269,28 +269,7 @@ public:
     void processReply();
 
 private:
-    friend struct ReplyChannel;
-    struct ReplyChannel: public Channel
-    {
-        ReplyChannel(LocalChannel* chan)
-            : chan_(chan)
-        {
-        }
-
-        // Channel overrides
-        std::unique_ptr<XdrSink> acquireSendBuffer() override;
-        void releaseSendBuffer(std::unique_ptr<XdrSink>&& msg) override;
-        void sendMessage(std::unique_ptr<XdrSink>&& msg) override;
-        std::unique_ptr<XdrSource> receiveMessage(
-            std::shared_ptr<Channel>& replyChan,
-            clock_type::duration timeout) override;
-        void releaseReceiveBuffer(std::unique_ptr<XdrSource>&& msg) override;
-
-        LocalChannel* chan_;
-    };
-
     std::deque<std::unique_ptr<XdrMemory>> queue_;
-    std::shared_ptr<ReplyChannel> replyChannel_;
 };
 
 /// Send or receive RPC messages over a socket. Thread safe.

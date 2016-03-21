@@ -630,8 +630,7 @@ Channel::processReply(
 }
 
 LocalChannel::LocalChannel(std::shared_ptr<ServiceRegistry> svcreg)
-    : Channel(svcreg),
-      replyChannel_(std::make_shared<ReplyChannel>(this))
+    : Channel(svcreg)
 {
     // Disable retransmits - we never drop messages so we don't need
     // retransmits
@@ -656,11 +655,23 @@ LocalChannel::sendMessage(std::unique_ptr<XdrSink>&& xdrs)
     std::unique_ptr<XdrMemory> msg(static_cast<XdrMemory*>(xdrs.release()));
     msg->setReadSize(msg->writePos());
     msg->rewind();
-    rpc_msg call_msg;
-    xdr(call_msg, static_cast<XdrSource*>(msg.get()));
-    svcreg_->process(
-        CallContext(
-            std::move(call_msg), std::move(msg), replyChannel_));
+
+    if (msg->readSize() < 2*sizeof(XdrWord))
+        return;
+    XdrWord* p = reinterpret_cast<XdrWord*>(msg->buf());
+    uint32_t mtype = p[1];
+
+    if (mtype == CALL) {
+        rpc_msg call_msg;
+        xdr(call_msg, static_cast<XdrSource*>(msg.get()));
+        svcreg_->process(
+            CallContext(
+                std::move(call_msg), std::move(msg), shared_from_this()));
+    }
+    else {
+        std::unique_lock<std::mutex> lock(mutex_);
+        queue_.push_back(std::move(msg));
+    }
 }
 
 std::unique_ptr<XdrSource>
@@ -693,42 +704,6 @@ LocalChannel::processReply()
     running_ = true;
     processIncomingMessage(nulltx, lock, 0s);
     running_ = false;
-}
-
-std::unique_ptr<XdrSink>
-LocalChannel::ReplyChannel::acquireSendBuffer()
-{
-    return std::make_unique<XdrMemory>(chan_->bufferSize_);
-}
-
-void
-LocalChannel::ReplyChannel::releaseSendBuffer(std::unique_ptr<XdrSink>&& msg)
-{
-    msg.reset();
-}
-
-void
-LocalChannel::ReplyChannel::sendMessage(std::unique_ptr<XdrSink>&& xdrs)
-{
-    std::unique_ptr<XdrMemory> msg(static_cast<XdrMemory*>(xdrs.release()));
-    msg->setReadSize(msg->writePos());
-    msg->rewind();
-    std::unique_lock<std::mutex> lock(chan_->mutex_);
-    chan_->queue_.emplace_back(std::move(msg));
-}
-
-std::unique_ptr<XdrSource>
-LocalChannel::ReplyChannel::receiveMessage(
-    std::shared_ptr<Channel>&, clock_type::duration)
-{
-    return nullptr;
-}
-
-void
-LocalChannel::ReplyChannel::releaseReceiveBuffer(
-    std::unique_ptr<XdrSource>&& msg)
-{
-    msg.reset();
 }
 
 SocketChannel::SocketChannel(int sock)
