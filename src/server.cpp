@@ -296,7 +296,7 @@ CallContext::CallContext(CallContext&& other)
       chan_(std::move(other.chan_)),
       svc_(std::move(other.svc_)),
       client_(std::move(other.client_)),
-      credptr_(other.credptr_),
+      credptr_(other.credptr_ == &other.cred_ ? &cred_ : other.credptr_),
       cred_(std::move(other.cred_))
 {
 }
