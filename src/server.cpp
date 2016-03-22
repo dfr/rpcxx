@@ -369,9 +369,12 @@ auth_flavor CallContext::flavor()
 
 void CallContext::operator()()
 {
+    CallContext* prev;
 #ifdef __APPLE__
+    prev = (CallContext*) pthread_getspecific(currentContextKey());
     pthread_setspecific(currentContextKey(), this);
 #else
+    prev = currentContext_;
     currentContext_ = this;
 #endif
 
@@ -388,9 +391,9 @@ void CallContext::operator()()
     }
 
 #ifdef __APPLE__
-    pthread_setspecific(currentContextKey(), nullptr);
+    pthread_setspecific(currentContextKey(), prev);
 #else
-    currentContext_ = nullptr;
+    currentContext_ = prev;
 #endif
 }
 
