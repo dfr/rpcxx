@@ -325,10 +325,17 @@ void CallContext::lookupCred()
             cbody.cred.auth_body.size());
         XdrSource* xdrs = &xdrmem;
         std::uint32_t stamp, uid, gid;
-        std::string machinename;
+        std::uint32_t namelen;
         std::vector<uint32_t> gids;
         xdr(stamp, xdrs);
-        xdr(machinename, xdrs);
+        // Ignore the machinename
+        xdr(namelen, xdrs);
+        namelen = __round(namelen);
+        auto p = xdrs->readInline<uint8_t>(namelen);
+        if (!p) {
+            std::vector<uint8_t> buf(namelen);
+            xdrs->getBytes(buf.data(), namelen);
+        }
         xdr(uid, xdrs);
         xdr(gid, xdrs);
         xdr(gids, xdrs);

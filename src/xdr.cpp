@@ -11,8 +11,9 @@ XdrSource::~XdrSource()
 }
 
 XdrMemory::XdrMemory(size_t sz)
+    : storage_((uint8_t*) std::malloc(sz),
+               [](uint8_t* p) { std::free(p); })
 {
-    storage_ = std::make_unique<uint8_t[]>(sz);
     size_ = sz;
     buf_ = storage_.get();
     writeCursor_ = buf_;

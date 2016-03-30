@@ -4,6 +4,8 @@
 
 #include <cassert>
 #include <cinttypes>
+#include <cstdlib>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -63,7 +65,8 @@ public:
     /// A reference to data owned by this buffer
     Buffer(size_t size)
         : size_(size),
-          storage_(std::make_unique<uint8_t[]>(size)),
+          storage_((uint8_t*) std::malloc(size),
+                   [](uint8_t* p) { std::free(p); }),
           data_(storage_.get())
     {
     }
@@ -98,7 +101,7 @@ public:
 
 private:
     size_t size_;
-    std::unique_ptr<uint8_t[]> storage_;
+    std::unique_ptr<uint8_t, std::function<void(uint8_t*)>> storage_;
     uint8_t* data_;
     std::shared_ptr<Buffer> parent_;
 };
@@ -608,9 +611,13 @@ inline void xdr(std::vector<T>& v, XdrSource* xdrs)
 {
     uint32_t sz;
     xdr(sz, xdrs);
-    v.resize(sz);
-    for (auto& e : v)
+    v.clear();
+    v.reserve(sz);
+    for (uint32_t i = 0; i < sz; i++) {
+        T e;
         xdr(e, xdrs);
+        v.emplace_back(std::move(e));
+    }
 }
 
 template <typename T, size_t N>
@@ -630,9 +637,13 @@ inline void xdr(bounded_vector<T, N>& v, XdrSource* xdrs)
     xdr(sz, xdrs);
     if (sz > N)
         throw XdrError("array overflow");
-    v.resize(sz);
-    for (auto& e : v)
+    v.clear();
+    v.reserve(sz);
+    for (uint32_t i = 0; i < sz; i++) {
+        T e;
         xdr(e, xdrs);
+        v.emplace_back(std::move(e));
+    }
 }
 
 template <typename T>
@@ -737,7 +748,7 @@ public:
     void fill() override;
 
 protected:
-    std::unique_ptr<uint8_t[]> storage_;
+    std::unique_ptr<uint8_t, std::function<void(uint8_t*)>> storage_;
     size_t size_;
     uint8_t* buf_;
 };
