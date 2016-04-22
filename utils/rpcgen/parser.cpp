@@ -12,6 +12,7 @@ unordered_map<int, shared_ptr<Type>> Parser::unsignedIntTypes_;
 unordered_map<int, shared_ptr<Type>> Parser::floatTypes_;
 shared_ptr<Type> Parser::boolType_;
 shared_ptr<Type> Parser::voidType_;
+shared_ptr<Type> Parser::onewayType_;
 
 SyntaxError::SyntaxError(
     const Location& loc, const string& message)
@@ -86,6 +87,14 @@ Parser::voidType()
     if (!voidType_)
         voidType_ = make_shared<VoidType>();
     return voidType_;
+}
+
+shared_ptr<Type>
+Parser::onewayType()
+{
+    if (!onewayType_)
+        onewayType_ = make_shared<OnewayType>();
+    return onewayType_;
 }
 
 shared_ptr<Specification>
@@ -216,6 +225,7 @@ Parser::parseStructBody()
         case Token::KOPAQUEREF:
         case Token::KSTRING:
         case Token::KVOID:
+        case Token::KONEWAY:
         case Token::KUNSIGNED:
         case Token::KINT:
         case Token::KHYPER:
@@ -284,7 +294,6 @@ Parser::parseTypeSpecifier()
     case Token::KVOID:
         nextToken();
         return voidType();
-        break;
 
     case Token::KUNSIGNED:
         nextToken();
@@ -355,6 +364,16 @@ Parser::parseTypeSpecifier()
     }
     }
     unexpected();
+}
+
+shared_ptr<Type>
+Parser::parseReturnTypeSpecifier()
+{
+    if (tok_.type() == Token::KONEWAY) {
+        nextToken();
+        return onewayType();
+    }
+    return parseTypeSpecifier();
 }
 
 pair<string, shared_ptr<Type>>
@@ -470,7 +489,7 @@ Parser::parseProgramDefinition()
         expectToken('{');
         auto ver = make_shared<ProgramVersion>(vername);
         do {
-            auto retType = parseTypeSpecifier();
+            auto retType = parseReturnTypeSpecifier();
             vector<shared_ptr<Type>> argTypes;
             auto procname = tok_.svalue();
             expectToken(Token::IDENTIFIER);

@@ -116,7 +116,7 @@ public:
         const std::string& host, const std::string& service,
         const std::string& netid);
     static std::shared_ptr<Channel> open(
-        const std::string& url, const std::string& netid);
+        const std::string& url, const std::string& netid = "");
 
     /// Create an RPC channel
     Channel();
@@ -147,6 +147,13 @@ public:
         std::function<void(XdrSource*)> xresults,
         Protection prot = Protection::DEFAULT,
         clock_type::duration timeout = std::chrono::seconds(30));
+
+    /// Send a remote procedure call without waiting for a reply. Any
+    /// replies which are received will be dropped.
+    void send(
+        Client* client, uint32_t proc,
+        std::function<void(XdrSink*)> xargs,
+        Protection prot = Protection::DEFAULT);
 
     /// Return a buffer suitable for encoding an outgoing message. When
     /// the message is complete, call sendMessage to send it to the remote

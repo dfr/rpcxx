@@ -16,6 +16,7 @@ public:
     virtual ~Type() {}
     virtual bool isPOD() const = 0;
     virtual bool isVoid() const { return false; }
+    virtual bool isOneway() const { return false; }
     virtual void print(Indent indent, ostream& str) const = 0;
     virtual void forwardDeclarations(Indent indent, ostream& str) const {}
 
@@ -177,6 +178,42 @@ public:
     int operator==(const Type& other) const override
     {
         auto p = dynamic_cast<const VoidType*>(&other);
+        if (p)
+            return true;
+        return false;
+    }
+};
+
+class OnewayType: public Type
+{
+public:
+    OnewayType()
+    {
+    }
+
+    bool isPOD() const override
+    {
+        return true;
+    }
+
+    bool isVoid() const override
+    {
+        return true;
+    }
+
+    bool isOneway() const override
+    {
+        return true;
+    }
+
+    void print(Indent indent, ostream& str) const override
+    {
+        str << "void";
+    }
+
+    int operator==(const Type& other) const override
+    {
+        auto p = dynamic_cast<const OnewayType*>(&other);
         if (p)
             return true;
         return false;

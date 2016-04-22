@@ -1,3 +1,4 @@
+#include <cassert>
 #include <cstdlib>
 #include <sstream>
 #include <unistd.h>
@@ -27,7 +28,7 @@ struct UrlParser
                 parsePort(s);
             }
         }
-        else if (scheme == "unix") {
+        else if (scheme == "local") {
             if (s.substr(0, 2) != "//")
                 throw RpcError("malformed url");
             path = s.substr(2);
@@ -227,12 +228,15 @@ std::vector<AddressInfo> oncrpc::getAddressInfo(
 std::vector<AddressInfo> oncrpc::getAddressInfo(
     const std::string& url, const std::string& netid)
 {
-    if (netid == "local") {
+    UrlParser p(url);
+
+    if (p.scheme == "local") {
+        assert(netid == "" || netid == "local");
         // Special case for local sockets
         sockaddr_un sun;
         sun.sun_family = AF_LOCAL;
-        std::copy_n(url.data(), url.size(), sun.sun_path);
-        sun.sun_path[url.size()] = '\0';
+        std::copy_n(p.path.data(), p.path.size(), sun.sun_path);
+        sun.sun_path[p.path.size()] = '\0';
         sun.sun_len = SUN_LEN(&sun);
         AddressInfo ai;
         ai.flags = 0;
@@ -244,14 +248,23 @@ std::vector<AddressInfo> oncrpc::getAddressInfo(
         return res;
     }
 
-    UrlParser p(url);
+    std::pair<int, int> nt;
+    if (netid == "") {
+        // Guess based on url scheme
+        if (p.scheme == "udp")
+            nt = getNetId("udp");
+        else
+            nt = getNetId("tcp");
+    }
+    else {
+        nt = getNetId(netid);
+    }
 
     auto host = p.host;
     auto service = p.port.size() > 0 ? p.port : p.scheme;
     addrinfo hints;
     addrinfo* res0;
     memset(&hints, 0, sizeof hints);
-    auto nt = getNetId(netid);
     hints.ai_family = std::get<0>(nt);
     hints.ai_socktype = std::get<1>(nt);
     if (std::isdigit(p.host[0])) {

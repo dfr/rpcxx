@@ -38,6 +38,7 @@ class bounded_vector: public std::vector<T>
 public:
     bounded_vector() : std::vector<T>() {}
     bounded_vector(const bounded_vector& other) : std::vector<T>(other) {}
+    bounded_vector(const std::vector<T>& other) : std::vector<T>(other) {}
     bounded_vector(std::initializer_list<T> init)
         : std::vector<T>(init) {}
 };

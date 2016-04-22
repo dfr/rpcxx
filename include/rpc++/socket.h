@@ -115,7 +115,7 @@ std::vector<AddressInfo> getAddressInfo(
 
 std::vector<AddressInfo> getAddressInfo(
     const std::string& url,
-    const std::string& nettype);
+    const std::string& nettype = "");
 
 AddressInfo uaddr2taddr(
     const std::string& uaddr, const std::string& netid);

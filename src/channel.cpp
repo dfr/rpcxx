@@ -299,8 +299,6 @@ Channel::call(
         sendMessage(std::move(xdrout));
         lock.lock();
 
-        // XXX support oneway
-
 	auto sendTime = now;
         tx.timeout  = now + retransmitInterval;
         if (tx.timeout > maxTime)
@@ -456,6 +454,35 @@ Channel::call(
         lock.lock();
         tx.body.reset();
     }
+}
+
+void Channel::send(
+    Client* client, uint32_t proc, std::function<void(XdrSink*)> xargs,
+    Protection prot)
+{
+    uint32_t xid;
+    auto txp = new Transaction;
+    auto& tx = *txp;
+
+    int gen;
+    std::unique_ptr<XdrSink> xdrout;
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    xid = tx.xid = xid_++;
+    VLOG(3) << "assigning new xid: " << tx.xid;
+    lock.unlock();
+
+    for (;;) {
+        gen = client->validateAuth(this, false);
+        xdrout = acquireSendBuffer();
+        if (!client->processCall(
+                xid, gen, proc, xdrout.get(), xargs, prot, tx.seq)) {
+            continue;
+        }
+        break;
+    }
+
+    sendMessage(std::move(xdrout));
 }
 
 bool Channel::processIncomingMessage(
@@ -819,7 +846,7 @@ DatagramChannel::receiveMessage(
     if (bytes == 0)
         return nullptr;
 
-    // Set up the message to decode the packaged_task
+    // Set up the message to decode the packet
     msg->advanceWrite(bytes);
     msg->flush();
 
@@ -893,7 +920,7 @@ StreamChannel::sendMessage(std::unique_ptr<XdrSink>&& xdrs)
 
     std::unique_lock<std::mutex> lock(writeMutex_);
     VLOG(3) << "writing " << len << " bytes to socket";
-    auto bytes = send(iov);
+    auto bytes = Socket::send(iov);
     if (bytes == 0)
         throw std::system_error(ENOTCONN, std::system_category());
 
@@ -976,7 +1003,7 @@ ReconnectChannel::send(const std::vector<iovec>& iov)
 {
     for (;;) {
         try {
-            auto bytes = StreamChannel::send(iov);
+            auto bytes = Socket::send(iov);
             if (bytes == 0)
                 throw std::system_error(ENOTCONN, std::system_category());
             return bytes;
@@ -1005,7 +1032,7 @@ ReconnectChannel::recv(void* buf, size_t buflen)
 void
 ReconnectChannel::reconnect()
 {
-    VLOG(2) << "reconnecting channel";
+    LOG(INFO) << "reconnecting channel";
     if (fd_ >= 0)
         ::close(fd_);
     try {
@@ -1016,7 +1043,7 @@ ReconnectChannel::reconnect()
         connect(addrinfo_.addr);
     }
     catch (std::system_error& e) {
-        VLOG(2) << "reconnect failed: " << e.what();
+        LOG(ERROR) << "reconnect failed: " << e.what();
         if (fd_ >= 0) {
             ::close(fd_);
             fd_ = -1;

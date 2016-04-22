@@ -316,7 +316,7 @@ private:
     static int
     longestCommonPrefix(const vector<string>& methods)
     {
-        if (methods.size() == 0)
+        if (methods.size() <= 1)
             return 0;
 
         string prefix = methods[0];
@@ -543,6 +543,7 @@ public:
     static shared_ptr<Type> floatType(int width);
     static shared_ptr<Type> boolType();
     static shared_ptr<Type> voidType();
+    static shared_ptr<Type> onewayType();
 
     shared_ptr<Specification> parse();
     shared_ptr<ConstantDefinition> parseConstantDefinition();
@@ -554,6 +555,7 @@ public:
     shared_ptr<UnionDefinition> parseUnionDefinition();
     shared_ptr<UnionType> parseUnionBody();
     shared_ptr<Type> parseTypeSpecifier();
+    shared_ptr<Type> parseReturnTypeSpecifier();
     pair<string, shared_ptr<Type>> parseDeclaration();
     shared_ptr<ProgramDefinition> parseProgramDefinition();
 
@@ -571,6 +573,7 @@ private:
     static unordered_map<int, shared_ptr<Type>> floatTypes_;
     static shared_ptr<Type> boolType_;
     static shared_ptr<Type> voidType_;
+    static shared_ptr<Type> onewayType_;
 };
 
 }

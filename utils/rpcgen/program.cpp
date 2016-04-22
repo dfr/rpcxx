@@ -42,34 +42,56 @@ void Procedure::printClientBody(Indent indent, ostream& str) const
 {
     str << indent << "{" << endl;
     ++indent;
-    if (!retType_->isVoid())
-        str << indent << *retType() << " _res;" << endl;
-    str << indent << "channel_->call(" << endl;
-    ++indent;
-    str << indent << "client_.get(), "
-         << name() << "," << endl
-         << indent << "[&](oncrpc::XdrSink* xdrs) {" << endl;
-    ++indent;
-    int i = 0;
-    for (const auto& argType: *this) {
-        if (argType->isVoid())
-            continue;
-        str << indent << "xdr(_arg" << i << ", xdrs);" << endl;
-        i++;
+    if (retType_->isOneway()) {
+        str << indent << "channel_->send(" << endl;
+        ++indent;
+        str << indent << "client_.get(), "
+            << name() << "," << endl
+            << indent << "[&](oncrpc::XdrSink* xdrs) {" << endl;
+        ++indent;
+        int i = 0;
+        for (const auto& argType: *this) {
+            if (argType->isVoid())
+                continue;
+            str << indent << "xdr(_arg" << i << ", xdrs);" << endl;
+            i++;
+        }
+        --indent;
+        str << indent << "});" << endl;
+        --indent;
+        --indent;
+        str << indent << "}" << endl;
     }
-    --indent;
-    str << indent << "}," << endl;
-    str << indent << "[&](oncrpc::XdrSource* xdrs) {" << endl;
-    ++indent;
-    if (!retType_->isVoid())
-        str << indent << "xdr(_res, xdrs);" << endl;
-    --indent;
-    str << indent << "});" << endl;
-    --indent;
-    if (!retType_->isVoid())
-        str << indent << "return std::move(_res);" << endl;
-    --indent;
-    str << indent << "}" << endl;
+    else {
+        if (!retType_->isVoid())
+            str << indent << *retType() << " _res;" << endl;
+        str << indent << "channel_->call(" << endl;
+        ++indent;
+        str << indent << "client_.get(), "
+            << name() << "," << endl
+            << indent << "[&](oncrpc::XdrSink* xdrs) {" << endl;
+        ++indent;
+        int i = 0;
+        for (const auto& argType: *this) {
+            if (argType->isVoid())
+                continue;
+            str << indent << "xdr(_arg" << i << ", xdrs);" << endl;
+            i++;
+        }
+        --indent;
+        str << indent << "}," << endl;
+        str << indent << "[&](oncrpc::XdrSource* xdrs) {" << endl;
+        ++indent;
+        if (!retType_->isVoid())
+            str << indent << "xdr(_res, xdrs);" << endl;
+        --indent;
+        str << indent << "});" << endl;
+        --indent;
+        if (!retType_->isVoid())
+            str << indent << "return _res;" << endl;
+        --indent;
+        str << indent << "}" << endl;
+    }
 }
 
 void ProgramVersion::print(Indent indent, ostream& str) const
@@ -245,7 +267,7 @@ void ProgramVersion::printServerStubs(
         i = 0;
         str << indent;
         if (!proc->retType()->isVoid()) {
-            str << "_ret = std::move(";
+            str << "_ret = ";
         }
         str << proc->methodName(prefixlen) << "(";
         for (auto argType: *proc) {
@@ -255,20 +277,19 @@ void ProgramVersion::printServerStubs(
                 i++;
             }
         }
-        if (!proc->retType()->isVoid()) {
-            str << ")";
-        }
         str << ");" << endl;
-        if (!proc->retType()->isVoid()) {
-            str << indent << "ctx.sendReply([&](oncrpc::XdrSink* xdrs) {"
-                << endl;
-            ++indent;
-            str << indent << "xdr(_ret, xdrs);" << endl;
-            --indent;
-            str << indent << "});" << endl;
-        }
-        else {
-            str << indent << "ctx.sendReply([](oncrpc::XdrSink*){});" << endl;
+        if (!proc->retType()->isOneway()) {
+            if (!proc->retType()->isVoid()) {
+                str << indent << "ctx.sendReply([&](oncrpc::XdrSink* xdrs) {"
+                    << endl;
+                ++indent;
+                str << indent << "xdr(_ret, xdrs);" << endl;
+                --indent;
+                str << indent << "});" << endl;
+            }
+            else {
+                str << indent << "ctx.sendReply([](oncrpc::XdrSink*){});" << endl;
+            }
         }
         str << indent << "break;" << endl;
         --indent;

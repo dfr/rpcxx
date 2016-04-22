@@ -19,6 +19,7 @@ static unordered_map<string, int> keywords = {
     { "float", Token::KFLOAT },
     { "hyper", Token::KHYPER },
     { "int", Token::KINT },
+    { "oneway", Token::KONEWAY },
     { "opaque", Token::KOPAQUE },
     { "opaqueref", Token::KOPAQUEREF },
     { "program", Token::KPROGRAM },

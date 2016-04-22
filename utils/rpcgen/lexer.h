@@ -43,6 +43,7 @@ public:
         KFLOAT,
         KHYPER,
         KINT,
+        KONEWAY,
         KOPAQUE,
         KOPAQUEREF,
         KPROGRAM,
