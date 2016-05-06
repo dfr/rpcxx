@@ -28,7 +28,7 @@ struct UrlParser
                 parsePort(s);
             }
         }
-        else if (scheme == "local") {
+        else if (scheme == "local" || scheme == "unix") {
             if (s.substr(0, 2) != "//")
                 throw RpcError("malformed url");
             path = s.substr(2);
