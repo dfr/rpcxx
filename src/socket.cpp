@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cstdlib>
+#include <cstring>
 #include <sstream>
 #include <unistd.h>
 #include <glog/logging.h>
@@ -374,6 +375,31 @@ int AddressInfo::port() const
         return ntohs(sinp->sin_port);
     }
     return -1;
+}
+
+void AddressInfo::setPort(int val)
+{
+    if (family == AF_INET6) {
+        sockaddr_in6* sin6p = (sockaddr_in6*) addr.addr();
+        sin6p->sin6_port = htons(val);
+    }
+    else if (family == AF_INET) {
+        sockaddr_in* sinp = (sockaddr_in*) addr.addr();
+        sinp->sin_port = htons(val);
+    }
+}
+
+bool AddressInfo::isWildcard() const
+{
+    if (family == AF_INET6) {
+        sockaddr_in6* sin6p = (sockaddr_in6*) addr.addr();
+        return memcmp(&sin6p->sin6_addr, &in6addr_any, sizeof(in6_addr)) == 0;
+    }
+    else if (family == AF_INET) {
+        sockaddr_in* sinp = (sockaddr_in*) addr.addr();
+        return sinp->sin_addr.s_addr == INADDR_ANY;
+    }
+    return false;
 }
 
 AddressInfo oncrpc::uaddr2taddr(

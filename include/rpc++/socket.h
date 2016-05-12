@@ -107,6 +107,8 @@ struct AddressInfo
     std::string uaddr() const;
     std::string netid() const;
     int port() const;
+    void setPort(int val);
+    bool isWildcard() const;
 };
 
 std::vector<AddressInfo> getAddressInfo(
@@ -269,6 +271,17 @@ public:
         if (len < 0)
             throw std::system_error(errno, std::system_category());
         return len;
+    }
+
+    Address peerName() const
+    {
+        struct sockaddr_storage ss;
+        socklen_t len = sizeof(ss);
+        if (::getpeername(
+                fd_, reinterpret_cast<sockaddr*>(&ss), &len) < 0) {
+            throw std::system_error(errno, std::system_category());
+        }
+        return Address(reinterpret_cast<const sockaddr&>(ss));
     }
 
 protected:

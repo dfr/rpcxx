@@ -206,6 +206,9 @@ public:
     /// re-connected to the remote endpoint.
     virtual void onReconnect(std::function<void()> cb) {}
 
+    /// Return the network address of the other end of this channel
+    virtual AddressInfo remoteAddress() const { return AddressInfo{}; }
+
 protected:
 
     /// Read a message from the channel. If the message is a reply, try to
@@ -314,6 +317,7 @@ public:
         std::shared_ptr<Channel>& replyChan,
         clock_type::duration timeout) override;
     void releaseReceiveBuffer(std::unique_ptr<XdrSource>&& msg) override;
+    AddressInfo remoteAddress() const override;
 
 protected:
     Address remoteAddr_;
@@ -353,6 +357,7 @@ public:
         std::shared_ptr<Channel>& replyChan,
         clock_type::duration timeout) override;
     void releaseReceiveBuffer(std::unique_ptr<XdrSource>&& msg) override;
+    AddressInfo remoteAddress() const override;
 
 private:
     void readAll(void* buf, size_t len);

@@ -866,6 +866,17 @@ DatagramChannel::releaseReceiveBuffer(std::unique_ptr<XdrSource>&& xdrs)
     xdrs_ = std::move(msg);
 }
 
+AddressInfo
+DatagramChannel::remoteAddress() const
+{
+    AddressInfo ai;
+    ai.family = remoteAddr_.addr()->sa_family;
+    ai.socktype = SOCK_DGRAM;
+    ai.protocol = 0;
+    ai.addr = remoteAddr_;
+    return ai;
+}
+
 StreamChannel::StreamChannel(int sock)
     : SocketChannel(sock)
 {
@@ -990,6 +1001,19 @@ StreamChannel::releaseReceiveBuffer(std::unique_ptr<XdrSource>&& xdrs)
     // XXX: rework the receive path to use standard sized buffers
     xdrs.reset();
 }
+
+AddressInfo
+StreamChannel::remoteAddress() const
+{
+    Address addr = peerName();
+    AddressInfo ai;
+    ai.family = addr.addr()->sa_family;
+    ai.socktype = SOCK_STREAM;
+    ai.protocol = 0;
+    ai.addr = addr;
+    return ai;
+}
+
 
 ReconnectChannel::ReconnectChannel(int sock, const AddressInfo& ai)
     : StreamChannel(sock),
