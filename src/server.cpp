@@ -84,7 +84,9 @@ GssClientContext::~GssClientContext()
 void
 GssClientContext::controlMessage(CallContext& ctx)
 {
+#ifndef NDEBUG
     auto& cred = ctx.gsscred();
+#endif
     uint32_t maj_stat, min_stat;
 
     std::vector<uint8_t> token;
