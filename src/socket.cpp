@@ -319,13 +319,11 @@ std::string AddressInfo::uaddr() const
             ss << val;
         }
         if (head.size() + tail.size() < 8) {
-            if (first)
-                ss << ":";
-            ss << ":";
+            ss << "::";
             first = false;
         }
-        for (auto val: head) {
-            if (!first)
+        for (auto val: tail) {
+            if (first)
                 ss << ":";
             first = false;
             ss << val;
@@ -402,7 +400,7 @@ bool AddressInfo::isWildcard() const
     return false;
 }
 
-AddressInfo oncrpc::uaddr2taddr(
+AddressInfo AddressInfo::fromUaddr(
     const std::string& uaddr, const std::string& netid)
 {
     auto portloIndex = uaddr.rfind('.');

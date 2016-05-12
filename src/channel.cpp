@@ -150,7 +150,7 @@ std::shared_ptr<Channel> Channel::open(
     if (uaddr == "") {
         throw RpcError("Program not registered");
     }
-    return Channel::open(uaddr2taddr(uaddr, netid));
+    return Channel::open(AddressInfo::fromUaddr(uaddr, netid));
 }
 
 std::shared_ptr<Channel> Channel::open(

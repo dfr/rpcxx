@@ -271,7 +271,7 @@ void ping(const vector<string>& args, const options& opts)
         exit(1);
     }
 
-    auto chan = Channel::open(uaddr2taddr(uaddr, opts.transport));
+    auto chan = Channel::open(AddressInfo::fromUaddr(uaddr, opts.transport));
 
     vector<uint32_t> versions;
     if (args.size() == 3)

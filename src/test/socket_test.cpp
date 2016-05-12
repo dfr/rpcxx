@@ -131,9 +131,11 @@ TEST(SocketTest, Uaddr)
         {"0.0.0.0.0.111", 111,  {0,0,0,0}},
         {"::.0.111",      111,  {0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0 }},
         {"1234::1.8.1",   2049, {0x12,0x34,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 }},
+        {"::1.8.1",       2049, {0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1 }},
     };
     for (auto t: tests) {
-        AddressInfo ai = uaddr2taddr(t.uaddr, "tcp");
+        AddressInfo ai = AddressInfo::fromUaddr(t.uaddr, "tcp");
+        EXPECT_EQ(t.uaddr, ai.uaddr());
         EXPECT_EQ(true, ai.family == AF_INET || ai.family == AF_INET6);
         EXPECT_EQ(SOCK_STREAM, ai.socktype);
         if (ai.family == AF_INET) {

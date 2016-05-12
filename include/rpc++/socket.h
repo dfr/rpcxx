@@ -104,6 +104,9 @@ struct AddressInfo
     Address addr;
     std::string canonname;
 
+    static AddressInfo fromUaddr(
+        const std::string& uaddr, const std::string& netid);
+
     std::string uaddr() const;
     std::string netid() const;
     int port() const;
@@ -119,8 +122,6 @@ std::vector<AddressInfo> getAddressInfo(
     const std::string& url,
     const std::string& nettype = "");
 
-AddressInfo uaddr2taddr(
-    const std::string& uaddr, const std::string& netid);
 
 class Socket;
 
