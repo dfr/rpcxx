@@ -101,8 +101,8 @@ TEST_F(ParserTest, UnionDefinition)
                     make_pair(
                         "i", Parser::intType(32, true)),
                     UnionArm(
-                        ValueList(move(make_shared<ConstantValue>(0)),
-                                  move(make_shared<ConstantValue>(1))),
+                        ValueList(make_shared<ConstantValue>(0),
+                                  make_shared<ConstantValue>(1)),
                         make_pair(
                             "foo", Parser::intType(32, true))),
                     UnionArm(
