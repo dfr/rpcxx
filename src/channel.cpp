@@ -970,6 +970,11 @@ StreamChannel::receiveMessage(
         readAll(recbuf, sizeof(uint32_t));
         uint32_t rec = *reinterpret_cast<const XdrWord*>(recbuf);
         uint32_t reclen = rec & 0x7fffffff;
+        if (total + reclen > bufferSize_) {
+            LOG(ERROR) << "Record too large: " << reclen;
+            close();
+            throw std::system_error(ENOTCONN, std::system_category());
+        }
         done = (rec & (1 << 31)) != 0;
         VLOG(4) << reclen << " byte record, eor=" << done;
         auto frag = std::make_unique<XdrMemory>(reclen);
