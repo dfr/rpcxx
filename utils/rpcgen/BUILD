@@ -17,6 +17,11 @@ cc_library(
     includes = ["."]
 )
 
+test_suite(
+    name = "small",
+    tags = ["small"],
+)
+
 cc_test(
     name = "rpcgen_test",
     size = "small",

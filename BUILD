@@ -16,7 +16,11 @@ cc_library(
 
 test_suite(
     name = "small",
-    tags = ["small"]
+    tags = ["small"],
+    tests = [
+        ":rpc_test",
+        "//utils/rpcgen:small",
+    ]
 )
 
 cc_test(
