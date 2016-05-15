@@ -108,7 +108,7 @@ _encapsulateBody(const uint32_t seq, F&& xbody)
     XdrMemory xm(body.data(), body.size());
     xdr(seq, &xm);
     xbody(&xm);
-    return std::move(body);
+    return body;
 }
 
 /// Encode a message body given the RPCSEC_GSS service and sequence

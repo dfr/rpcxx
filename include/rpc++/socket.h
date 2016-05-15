@@ -156,7 +156,7 @@ private:
     clock_type::duration idleTimeout_;
 };
 
-struct Socket
+class Socket
 {
 public:
     Socket(int fd)
@@ -194,7 +194,7 @@ public:
 
     /// Called from SocketManager::run when the socket is readable. Return
     /// true if the socket is still active or false if it should be closed
-    virtual bool onReadable(SocketManager* sockman) {}
+    virtual bool onReadable(SocketManager* sockman) { return false; }
 
     /// Bind the local address
     virtual void bind(const Address& addr)

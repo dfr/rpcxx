@@ -419,7 +419,7 @@ struct rpc_msg {
     }
 };
 
-static void xdr(const rpc_msg& v, XdrSink* xdrs)
+static inline void xdr(const rpc_msg& v, XdrSink* xdrs)
 {
     xdr(v.xid, xdrs);
     xdr(v.mtype, xdrs);
@@ -435,7 +435,7 @@ static void xdr(const rpc_msg& v, XdrSink* xdrs)
     }
 }
 
-static void xdr(rpc_msg& v, XdrSource* xdrs)
+static inline void xdr(rpc_msg& v, XdrSource* xdrs)
 {
     v.clear();
     xdr(v.xid, xdrs);

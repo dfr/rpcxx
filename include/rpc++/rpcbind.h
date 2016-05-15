@@ -292,7 +292,7 @@ public:
         channel_->call(client_.get(), 4,
                       [&](XdrSink* xdrs) { },
                       [&](XdrSource* xdrs) { xdr(res, xdrs); });
-        return std::move(res);
+        return res;
     }
 
     rpcb_rmtcallres callit(const rpcb_rmtcallargs& args)
@@ -301,7 +301,7 @@ public:
         channel_->call(client_.get(), 5,
                       [&](XdrSink* xdrs) { xdr(args, xdrs); },
                       [&](XdrSource* xdrs) { xdr(res, xdrs); });
-        return std::move(res);
+        return res;
     }
 
     uint32_t gettime()
@@ -319,7 +319,7 @@ public:
         channel_->call(client_.get(), 7,
                       [&](XdrSink* xdrs) { xdr(args, xdrs); },
                       [&](XdrSource* xdrs) { xdr(res, xdrs); });
-        return std::move(res);
+        return res;
     }
 
     std::string taddr2uaddr(const netbuf& args)
@@ -328,7 +328,7 @@ public:
         channel_->call(client_.get(), 7,
                       [&](XdrSink* xdrs) { xdr(args, xdrs); },
                       [&](XdrSource* xdrs) { xdr(res, xdrs); });
-        return std::move(res);
+        return res;
     }
 
 private:

@@ -11,7 +11,7 @@ class Channel;
 class Credential;
 class XdrSink;
 class XdrSource;
-class accepted_reply;
+struct accepted_reply;
 
 /// Quality of protection used for RPC messages on a channel. Note: these
 /// values are chosen to match those used in the RPCSEC_GSS protocol
