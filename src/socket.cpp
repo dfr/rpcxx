@@ -514,6 +514,10 @@ SocketManager::run()
         ::timeval tv { int(sec), int(usec) };
         auto nready = ::select(maxfd + 1, &rset, nullptr, nullptr, &tv);
         if (nready < 0) {
+            if (errno == EBADF || errno == EINTR) {
+                lock.lock();
+                continue;
+            }
             throw std::system_error(errno, std::system_category());
         }
 
