@@ -310,23 +310,28 @@ std::string AddressInfo::uaddr() const
             ;
         for (; i < 8; i++)
             tail.push_back(ntohs(p[i]));
-        bool first = true;
-        ss << std::hex;
-        for (auto val: head) {
-            if (!first)
-                ss << ":";
-            first = false;
-            ss << val;
-        }
-        if (head.size() + tail.size() < 8) {
+        if (head.size() + tail.size() == 0) {
             ss << "::";
-            first = false;
         }
-        for (auto val: tail) {
-            if (first)
+        else {
+            bool first = true;
+            ss << std::hex;
+            for (auto val: head) {
+                if (!first)
+                    ss << ":";
+                first = false;
+                ss << val;
+            }
+            if (head.size() + tail.size() < 8) {
                 ss << ":";
-            first = false;
-            ss << val;
+                first = false;
+            }
+            for (auto val: tail) {
+                if (!first)
+                    ss << ":";
+                first = false;
+                ss << val;
+            }
         }
         uint16_t port = ntohs(sin6p->sin6_port);
         ss << std::dec << "." << (port >> 8) << "." << (port & 0xff);
