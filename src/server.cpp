@@ -326,9 +326,10 @@ void CallContext::lookupCred()
             cbody.cred.auth_body.data(),
             cbody.cred.auth_body.size());
         XdrSource* xdrs = &xdrmem;
-        std::uint32_t stamp, uid, gid;
+        std::uint32_t stamp;
         std::uint32_t namelen;
-        std::vector<uint32_t> gids;
+        std::int32_t uid, gid;
+        std::vector<int32_t> gids;
         xdr(stamp, xdrs);
         // Ignore the machinename
         xdr(namelen, xdrs);
@@ -370,6 +371,7 @@ auth_flavor CallContext::flavor()
         case GssService::PRIVACY:
             return RPCSEC_GSS_KRB5P;
         }
+        abort();
     }
     else {
         return cbody.cred.flavor;

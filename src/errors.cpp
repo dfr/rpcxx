@@ -79,7 +79,8 @@ AuthError::AuthError(int stat)
                 "RPCSEC_GSS_CTXPROBLEM"
             };
             std::ostringstream msg;
-            if (stat < AUTH_OK || stat > RPCSEC_GSS_CTXPROBLEM)
+            if (uint32_t(stat) < AUTH_OK ||
+                uint32_t(stat) > RPCSEC_GSS_CTXPROBLEM)
                 msg << "RPC: unknown auth error: " << int(stat);
             else
                 msg << "RPC: auth error: " << str[stat];

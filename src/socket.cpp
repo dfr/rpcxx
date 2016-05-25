@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
@@ -71,7 +72,7 @@ struct UrlParser
         }
         else {
             int i = 0;
-            while (i < s.size() && s[i] != ':' && s[i] != '/')
+            while (i < int(s.size()) && s[i] != ':' && s[i] != '/')
                 i++;
             host = s.substr(0, i);
             s = s.substr(i);
@@ -488,6 +489,8 @@ SocketManager::run()
                 continue;
             }
             int fd = i.first->fd();
+            if (fd < 0)
+                continue;
             maxfd = std::max(maxfd, fd);
             FD_SET(fd, &rset);
         }
@@ -500,8 +503,10 @@ SocketManager::run()
 
         auto stopTime = next();
         auto now = clock_type::now();
-        auto timeout = std::chrono::duration_cast<std::chrono::microseconds>(
-            stopTime - now);
+        auto timeout =
+            std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    stopTime - now));
         if (timeout > idleTimeout_)
             timeout = idleTimeout_;
         if (timeout.count() < 0)

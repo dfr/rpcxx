@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <functional>
 #include <rpc++/xdr.h>
 

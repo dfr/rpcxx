@@ -88,9 +88,9 @@ struct authsys_parms
 {
     uint32_t stamp;
     std::string machinename;
-    uint32_t uid;
-    uint32_t gid;
-    std::vector<uint32_t> gids;
+    int32_t uid;
+    int32_t gid;
+    std::vector<int32_t> gids;
 };
 
 template <typename XDR>

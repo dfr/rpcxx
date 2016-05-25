@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <stdexcept>
 #include <sstream>
 
 #include "utils.h"

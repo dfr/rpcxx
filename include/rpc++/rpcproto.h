@@ -3,13 +3,14 @@
 #pragma once
 
 #include <cinttypes>
+#include <type_traits>
 #include <vector>
 
 #include <rpc++/xdr.h>
 
 namespace oncrpc {
 
-enum auth_flavor: uint32_t {
+enum auth_flavor: int32_t {
     AUTH_NONE  = 0,
     AUTH_SYS   = 1,
     AUTH_SHORT = 2,
@@ -34,17 +35,17 @@ void xdr(RefType<opaque_auth, XDR> v, XDR* xdrs)
     xdr(v.auth_body, xdrs);
 }
 
-enum msg_type: uint32_t {
+enum msg_type: int32_t {
     CALL  = 0,
     REPLY = 1,
 };
 
-enum reply_stat: uint32_t {
+enum reply_stat: int32_t {
     MSG_ACCEPTED = 0,
     MSG_DENIED   = 1,
 };
 
-enum accept_stat: uint32_t {
+enum accept_stat: int32_t {
     SUCCESS       = 0,
     PROG_UNAVAIL  = 1,
     PROG_MISMATCH = 2,
@@ -53,12 +54,12 @@ enum accept_stat: uint32_t {
     SYSTEM_ERR    = 5
 };
 
-enum reject_stat: uint32_t {
+enum reject_stat: int32_t {
     RPC_MISMATCH = 0,
     AUTH_ERROR   = 1
 };
 
-enum auth_stat: uint32_t {
+enum auth_stat: int32_t {
     AUTH_OK           = 0,  /* success                        */
     /*
      * failed at remote end

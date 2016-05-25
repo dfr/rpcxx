@@ -296,7 +296,7 @@ TEST_F(ChannelTest, Message)
                 return false;
             if (bar->size() != other.bar->size())
                 return false;
-            for (auto i = 0; i < bar->size(); i++)
+            for (size_t i = 0; i < bar->size(); i++)
                 if (bar->data()[i] != other.bar->data()[i])
                     return false;
             return true;

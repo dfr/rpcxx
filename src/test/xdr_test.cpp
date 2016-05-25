@@ -42,8 +42,8 @@ public:
         T b;
         xdr(b, static_cast<XdrSource*>(xdrmem.get()));
         compare(a, b);
-        EXPECT_EQ(xdrmem->readPos(), N);
-        for (auto i = 0; i < N; i++)
+        EXPECT_EQ(size_t(xdrmem->readPos()), N);
+        for (size_t i = 0; i < N; i++)
             EXPECT_EQ(buf[i], x[i]);
     }
 };

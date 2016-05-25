@@ -13,8 +13,8 @@ public:
 
     /// Create a cred with the given values
     Credential(
-        uint32_t uid, uint32_t gid,
-        std::vector<uint32_t>&& gids,
+        int32_t uid, int32_t gid,
+        std::vector<int32_t>&& gids,
         bool privileged = false);
 
     /// Copy constructor
@@ -38,9 +38,9 @@ public:
     bool hasgroup(int gid)  const;
 
 private:
-    uint32_t uid_;
-    uint32_t gid_;
-    std::vector<uint32_t> gids_;
+    int32_t uid_;
+    int32_t gid_;
+    std::vector<int32_t> gids_;
     bool privileged_;
 };
 

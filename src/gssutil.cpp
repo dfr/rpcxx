@@ -23,7 +23,7 @@ reportError(gss_OID mech, uint32_t maj, uint32_t min)
     }
 #endif
 
-    uint32_t maj_stat, min_stat;
+    uint32_t min_stat;
     uint32_t message_context;
     gss_buffer_desc buf;
     std::ostringstream ss;
@@ -35,7 +35,7 @@ reportError(gss_OID mech, uint32_t maj, uint32_t min)
 
     message_context = 0;
     do {
-        maj_stat = gss_display_status(
+        gss_display_status(
             &min_stat, maj, GSS_C_GSS_CODE, GSS_C_NO_OID,
             &message_context, &buf);
         if (message_context != 0)
@@ -47,7 +47,7 @@ reportError(gss_OID mech, uint32_t maj, uint32_t min)
 	ss << ", ";
         message_context = 0;
         do {
-            maj_stat = gss_display_status(
+            gss_display_status(
                 &min_stat, min, GSS_C_MECH_CODE, mech,
                 &message_context, &buf);
             if (message_context != 0)

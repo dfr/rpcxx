@@ -2,6 +2,9 @@
 
 #pragma once
 
+#include <condition_variable>
+#include <mutex>
+
 #ifdef __APPLE__
 #include <GSS/GSS.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -234,7 +237,7 @@ private:
     bool established_;            // true if we have completed context init
     GssService defaultService_;   // default service
     std::vector<uint8_t> handle_; // server client handle
-    int inflightCalls_ = 0;
+    uint32_t inflightCalls_ = 0;
 };
 
 }

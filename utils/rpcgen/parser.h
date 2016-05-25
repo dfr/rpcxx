@@ -90,7 +90,7 @@ public:
     void print(Indent indent, ostream& str) override
     {
         str << indent
-            << "enum " << name_ << ": uint32_t {" << endl;
+            << "enum " << name_ << ": int32_t {" << endl;
         body_->printFields(indent + 1, str);
         str << indent << "};" << endl;
     }

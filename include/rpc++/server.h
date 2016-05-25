@@ -53,7 +53,7 @@ public:
     bool valid(uint32_t seq);
 
 private:
-    int size_;
+    uint32_t size_;
     uint32_t largestSeen_;
     std::deque<uint32_t> valid_;
 };

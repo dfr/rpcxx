@@ -322,7 +322,7 @@ struct ThreadPool
                 << ", pending: " << pending_ << " bytes";
         workers_[nextWorker_].add(move(ctx));
         nextWorker_++;
-        if (nextWorker_ == workers_.size())
+        if (nextWorker_ == int(workers_.size()))
             nextWorker_ = 0;
     }
 
@@ -412,7 +412,7 @@ TEST_F(ServerTest, MultiThread)
             [](XdrSource* xdrs) {
                 uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
         calls.emplace_back(move(f));
-        while (calls.size() > maxPending) {
+        while (int(calls.size()) > maxPending) {
             calls.front().get();
             calls.pop_front();
         }

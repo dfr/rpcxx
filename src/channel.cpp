@@ -95,7 +95,7 @@ Message::readSize() const
 void
 Message::fill()
 {
-    if (readIndex_ == iov_.size())
+    if (readIndex_ == int(iov_.size()))
         throw XdrError("overflow");
     auto iovp = &iov_[readIndex_];
     readCursor_ = reinterpret_cast<const uint8_t*>(iovp->iov_base);

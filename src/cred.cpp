@@ -1,3 +1,4 @@
+#include <climits>
 #include <pwd.h>
 #include <unistd.h>
 
@@ -13,7 +14,7 @@ Credential::Credential()
 }
 
 Credential::Credential(
-    uint32_t uid, uint32_t gid, std::vector<uint32_t>&& gids, bool admin)
+    int32_t uid, int32_t gid, std::vector<int32_t>&& gids, bool admin)
     : uid_(uid),
       gid_(gid),
       gids_(std::move(gids)),
@@ -80,7 +81,7 @@ bool LocalCredMapper::lookupCred(const std::string& name, Credential& cred)
     ::passwd* pwd;
 
     if (::getpwnam_r(name.c_str(), &pbuf, buf, sizeof(buf), &pwd) == 0) {
-        std::vector<uint32_t> groups;
+        std::vector<int32_t> groups;
         static_assert(sizeof(GID_T) == sizeof(uint32_t), "sizeof(GID_T) != 4");
         groups.resize(NGROUPS_MAX);
         int len = NGROUPS_MAX;

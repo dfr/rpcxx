@@ -3,6 +3,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstring>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -34,7 +35,7 @@ public:
 
     Address(const Address& other)
     {
-        memcpy(&addr_, &other.addr_, other.addr_.ss_len);
+        ::memcpy(&addr_, &other.addr_, other.addr_.ss_len);
     }
 
     Address(const std::string& path);
