@@ -290,6 +290,9 @@ public:
     /// Remove the handler for the given program and version
     void remove(uint32_t prog, uint32_t vers);
 
+    /// Allocate an unused program number in the given inclusive range
+    uint32_t allocate(uint32_t start, uint32_t end);
+
     /// Look up a service handler for the given program and version
     const Service lookup(uint32_t prog, uint32_t vers) const;
 

@@ -580,6 +580,25 @@ ServiceRegistry::remove(uint32_t prog, uint32_t vers)
     services_.erase(std::pair<uint32_t, uint32_t>(prog, vers));
 }
 
+uint32_t
+ServiceRegistry::allocate(uint32_t start, uint32_t end)
+{
+    std::unique_lock<std::mutex> lock(mutex_);
+    uint32_t prog = start;
+    while (prog <= end) {
+        auto p = programs_.find(prog);
+        if (p != programs_.end()) {
+            prog++;
+            continue;
+        }
+        programs_[prog] = {};
+        return prog;
+    }
+    LOG(ERROR) << "No free program numbers in the range ["
+               << start << "," << end << "]";
+    abort();
+}
+
 const Service
 ServiceRegistry::lookup(uint32_t prog, uint32_t vers) const
 {
