@@ -19,6 +19,10 @@ using std::uint8_t;
 using std::uint32_t;
 using std::uint64_t;
 
+using std::int8_t;
+using std::int32_t;
+using std::int64_t;
+
 #include <machine/endian.h>
 
 /// These templates are used to implement bounded strings and arrays
@@ -550,6 +554,18 @@ inline void xdr(unsigned long& v, XdrSource* xdrs)
 {
     xdr(reinterpret_cast<uint64_t&>(v), xdrs);
 }
+
+// Similarly, int64_t and long are the same type
+inline void xdr(const int64_t v, XdrSink* xdrs)
+{
+    xdr(reinterpret_cast<const uint64_t&>(v), xdrs);
+}
+
+inline void xdr(int64_t& v, XdrSource* xdrs)
+{
+    xdr(reinterpret_cast<uint64_t&>(v), xdrs);
+}
+
 #endif
 
 inline void xdr(const float v, XdrSink* xdrs)
