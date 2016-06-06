@@ -1,3 +1,8 @@
+/*-
+ * Copyright (c) 2016 Doug Rabson
+ * All rights reserved.
+ */
+
 #include <thread>
 #include <sys/socket.h>
 #include <sys/un.h>

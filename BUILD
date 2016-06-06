@@ -1,3 +1,8 @@
+#-
+# Copyright (c) 2016 Doug Rabson
+# All rights reserved.
+#
+
 cc_library(
     name = "rpcxx",
     copts = ["-std=c++14"],

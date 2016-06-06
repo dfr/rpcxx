@@ -1,3 +1,8 @@
+/*-
+ * Copyright (c) 2016 Doug Rabson
+ * All rights reserved.
+ */
+
 #include <cstdlib>
 #include <iostream>
 #include <unistd.h>

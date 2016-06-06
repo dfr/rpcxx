@@ -1,3 +1,8 @@
+/*-
+ * Copyright (c) 2016 Doug Rabson
+ * All rights reserved.
+ */
+
 #include "parser.h"
 
 using namespace oncrpc::rpcgen;

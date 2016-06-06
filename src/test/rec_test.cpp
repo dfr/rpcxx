@@ -1,3 +1,8 @@
+/*-
+ * Copyright (c) 2016 Doug Rabson
+ * All rights reserved.
+ */
+
 #include <array>
 #include <deque>
 #include <rpc++/rec.h>

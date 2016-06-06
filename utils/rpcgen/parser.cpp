@@ -1,3 +1,8 @@
+/*-
+ * Copyright (c) 2016 Doug Rabson
+ * All rights reserved.
+ */
+
 #include <cassert>
 #include <cctype>
 #include <sstream>

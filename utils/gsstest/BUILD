@@ -1,3 +1,8 @@
+#-
+# Copyright (c) 2016 Doug Rabson
+# All rights reserved.
+#
+
 cc_binary(
     name = "gsstest",
     srcs = ["gsstest.c"],
