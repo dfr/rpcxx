@@ -61,13 +61,13 @@ public:
         XdrSource* xdrs, std::function<void(XdrSource*)> xresults,
         Protection prot) override
     {
-        verf_ = move(areply.verf.auth_body);
+        verf_ = areply.verf.auth_body;
         xresults(xdrs);
         return true;
     }
 
     const GssCred& cred_;
-    vector<uint8_t> verf_;
+    bounded_vector<uint8_t, 400> verf_;
 };
 
 }

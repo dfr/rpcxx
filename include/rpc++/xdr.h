@@ -8,6 +8,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cinttypes>
 #include <cstdlib>
@@ -43,15 +44,90 @@ public:
 };
 
 template <typename T, size_t N>
-class bounded_vector: public std::vector<T>
-{
-public:
-    bounded_vector() : std::vector<T>() {}
-    bounded_vector(const bounded_vector& other) : std::vector<T>(other) {}
-    bounded_vector(const std::vector<T>& other) : std::vector<T>(other) {}
-    bounded_vector(std::initializer_list<T> init)
-        : std::vector<T>(init) {}
+struct bounded_vector {
+    bounded_vector() : size_(0) {}
+    bounded_vector(const bounded_vector& other);
+    bounded_vector(const std::vector<T>& other);
+    bounded_vector(std::initializer_list<T> init);
+
+    bounded_vector& operator=(const bounded_vector& other);
+    bounded_vector& operator=(const std::vector<T>& other);
+
+    T& operator[](size_t index) {
+        return data_[index];
+    }
+    const T& operator[](size_t index) const {
+        return data_[index];
+    }
+
+    size_t size() const { return size_; }
+    auto begin() const { return data_.begin(); }
+    auto end() const { return data_.begin() + size_; }
+    auto begin() { return data_.begin(); }
+    auto end() { return data_.begin() + size_; }
+    auto data() const { return data_.data(); }
+    auto data() { return data_.data(); }
+    void resize(size_t sz) { size_ = sz; }
+
+private:
+    uint32_t size_;
+    std::array<T, N> data_;
 };
+
+template <typename T, size_t N>
+bounded_vector<T, N>::bounded_vector(const bounded_vector<T, N>& other)
+{
+    size_ = other.size();
+    std::copy(other.begin(), other.end(), begin());
+}
+
+template <typename T, size_t N>
+bounded_vector<T, N>::bounded_vector(const std::vector<T>& other)
+{
+    assert(other.size() <= N);
+    size_ = other.size();
+    std::copy(other.begin(), other.end(), begin());
+}
+
+template <typename T, size_t N>
+bounded_vector<T, N>::bounded_vector(std::initializer_list<T> init)
+{
+    size_ = init.size();
+    std::copy(init.begin(), init.end(), begin());
+}
+
+template <typename T, size_t N>
+bounded_vector<T, N>&
+bounded_vector<T, N>::operator=(const bounded_vector<T, N>& other)
+{
+    size_ = other.size();
+    std::copy(other.begin(), other.end(), begin());
+    return *this;
+}
+
+template <typename T, size_t N>
+bounded_vector<T, N>&
+bounded_vector<T, N>::operator=(const std::vector<T>& other)
+{
+    assert(other.size() <= N);
+    size_ = other.size();
+    std::copy(other.begin(), other.end(), begin());
+    return *this;
+}
+
+template <typename T, size_t N>
+int operator==(const bounded_vector<T, N>& x, const bounded_vector<T, N>& y)
+{
+    if (x.size() != y.size())
+        return false;
+    return std::equal(x.begin(), x.end(), y.begin(), y.end());
+}
+
+template <typename T, size_t N>
+int operator!=(const bounded_vector<T, N>& x, const bounded_vector<T, N>& y)
+{
+    return !(x == y);
+}
 
 /// A reference to buffered application data. This can be used to reduce
 /// memory copies for large buffers. XXX reword
@@ -434,7 +510,9 @@ template <size_t N>
 inline void xdr(const bounded_vector<uint8_t, N>& v, XdrSink* xdrs)
 {
     assert(v.size() <= N);
-    xdr(static_cast<const std::vector<uint8_t>&>(v), xdrs);
+    uint32_t sz = v.size();
+    xdr(sz, xdrs);
+    xdrs->putBytes(v.data(), sz);
 }
 
 template <size_t N>
@@ -660,12 +738,9 @@ inline void xdr(bounded_vector<T, N>& v, XdrSource* xdrs)
     xdr(sz, xdrs);
     if (sz > N)
         throw XdrError("array overflow");
-    v.clear();
-    v.reserve(sz);
+    v.resize(sz);
     for (uint32_t i = 0; i < sz; i++) {
-        T e;
-        xdr(e, xdrs);
-        v.emplace_back(std::move(e));
+        xdr(v.data()[i], xdrs);
     }
 }
 

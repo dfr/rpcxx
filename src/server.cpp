@@ -228,7 +228,7 @@ GssClientContext::getVerifier(CallContext& ctx, opaque_auth& verf)
 
     verf.flavor = RPCSEC_GSS;
     verf.auth_body.resize(mic.length);
-    copy_n(static_cast<uint8_t*>(mic.value), mic.length,
+    std::copy_n(static_cast<uint8_t*>(mic.value), mic.length,
            verf.auth_body.begin());
     gss_release_buffer(&min_stat, &mic);
 
