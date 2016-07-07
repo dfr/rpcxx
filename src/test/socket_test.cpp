@@ -6,6 +6,7 @@
 #include <array>
 
 #include <rpc++/socket.h>
+#include <rpc++/urlparser.h>
 #include <gtest/gtest.h>
 
 using namespace oncrpc;
@@ -102,6 +103,7 @@ TEST(SocketTest, AddressInfo)
         {"nfs://127.0.0.1",       2049, {127,0,0,1}},
         {"http://localhost",      80, {0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1}},
     };
+    UrlParser::addHostbasedScheme("nfs");
     for (auto t: tests) {
         auto addrs = getAddressInfo(t.url, "tcp");
         EXPECT_GE(addrs.size(), 0);
