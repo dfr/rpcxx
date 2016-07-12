@@ -322,6 +322,12 @@ public:
     bool lookupCred(
         const std::string& user, const std::string& realm, Credential& cred);
 
+    /// Add a filter for incoming requests
+    void setFilter(std::shared_ptr<Filter> filter)
+    {
+        filter_ = filter;
+    }
+
 private:
     bool validateAuth(CallContext& ctx);
 
@@ -332,6 +338,7 @@ private:
     std::unordered_map<
         uint32_t, std::shared_ptr<_detail::GssClientContext>> clients_;
     std::unordered_map<std::string, std::shared_ptr<CredMapper>> credmap_;
+    std::shared_ptr<Filter> filter_;
 };
 
 }

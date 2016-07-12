@@ -16,6 +16,7 @@
 #include <rpc++/errors.h>
 #include <rpc++/rpcbind.h>
 #include <rpc++/rec.h>
+#include <rpc++/rest.h>
 #include <rpc++/server.h>
 #include <rpc++/xdr.h>
 
@@ -895,8 +896,34 @@ StreamChannel::StreamChannel(int sock, std::shared_ptr<ServiceRegistry> svcreg)
     svcreg_ = svcreg;
 }
 
+StreamChannel::StreamChannel(
+    int sock,
+    std::shared_ptr<ServiceRegistry> svcreg,
+    std::shared_ptr<RestRegistry> restreg)
+    : StreamChannel(sock, svcreg)
+{
+    restreg_ = restreg;
+}
+
 StreamChannel::~StreamChannel()
 {
+}
+
+bool
+StreamChannel::onReadable(SocketManager* sockman)
+{
+    if (restchan_)
+        return restchan_->onReadable(this);
+    auto res = SocketChannel::onReadable(sockman);
+
+    // If restchan_ is non-null after calling
+    // SocketChannel::onReadable, we have detected that the client is
+    // sending REST requests on this channel. Return true to our
+    // caller to indicate that the socket is still valid.
+    if (!res && restchan_)
+        return true;
+
+    return res;
 }
 
 std::unique_ptr<XdrSink>
@@ -976,6 +1003,27 @@ StreamChannel::receiveMessage(
         uint32_t rec = *reinterpret_cast<const XdrWord*>(recbuf);
         uint32_t reclen = rec & 0x7fffffff;
         if (total + reclen > bufferSize_) {
+            // Check for a possible REST connection
+            if (restreg_) {
+                std::array<char, 4> data;
+                data[0] = recbuf[0];
+                data[1] = recbuf[1];
+                data[2] = recbuf[2];
+                data[3] = recbuf[3];
+                if (data == std::array<char, 4>{{'G','E','T',' '}} ||
+                    data == std::array<char, 4>{{'P','U','T',' '}} ||
+                    data == std::array<char, 4>{{'P','O','S','T'}} ||
+                    data == std::array<char, 4>{{'D','E','L','E'}} ||
+                    data == std::array<char, 4>{{'H','E','A','D'}}) {
+                    VLOG(2) << "Treating channel as REST endpoint";
+                    restchan_ = std::make_shared<RestChannel>(restreg_, data);
+                    // Throw a system_error to unwind back to
+                    // StreamChannel::onReadable which will detect
+                    // that we are treating this channel as a REST
+                    // endpoint
+                    throw std::system_error(EIO, std::system_category());
+                }
+            }
             LOG(ERROR) << "Record too large: " << reclen;
             close();
             throw std::system_error(ENOTCONN, std::system_category());
@@ -1098,7 +1146,7 @@ ListenSocket::onReadable(SocketManager* sockman)
     VLOG(3) << "New connection fd: " << newsock;
     int one = 1;
     ::setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-    auto chan = std::make_shared<StreamChannel>(newsock, svcreg_);
+    auto chan = std::make_shared<StreamChannel>(newsock, svcreg_, restreg_);
     chan->setCloseOnIdle(true);
     chan->setBufferSize(bufferSize_);
     sockman->add(chan);

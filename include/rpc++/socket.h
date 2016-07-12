@@ -30,7 +30,7 @@ namespace oncrpc {
 std::pair<int, int> getNetId(const std::string& netid);
 
 /// Wrap a sockaddr
-struct Address
+class Address
 {
 public:
     Address()
@@ -38,23 +38,13 @@ public:
         addr_.ss_len = 0;
     }
 
-    Address(const Address& other)
-    {
-        ::memcpy(&addr_, &other.addr_, other.addr_.ss_len);
-    }
+    Address(const Address& other);
+    Address(const sockaddr& sa);
+    explicit Address(const std::string& host);
 
-    Address(const std::string& path);
+    static Address fromUrl(const std::string& url);
 
-    Address(const sockaddr& sa)
-    {
-        memcpy(&addr_, &sa, sa.sa_len);
-    }
-
-    Address& operator=(const sockaddr& sa)
-    {
-        memcpy(&addr_, &sa, sa.sa_len);
-        return *this;
-    }
+    Address& operator=(const sockaddr& sa);
 
     operator bool() const
     {
@@ -87,8 +77,99 @@ public:
             memcmp(&addr_, &other.addr_, addr_.ss_len) == 0;
     }
 
+    std::string host() const;
+    std::string uaddr() const;
+    int port() const;
+    void setPort(int val);
+    bool isWildcard() const;
+
 private:
+    void copyFrom(const sockaddr& sa);
+
     sockaddr_storage addr_;
+};
+
+/// A representation of a network's address range using a base address
+/// and prefix length.
+class Network
+{
+public:
+    Network()
+        : prefix_(0)
+    {
+    }
+
+    Network(const Network& net)
+        : addr_(net.addr_),
+          prefix_(net.prefix_)
+    {
+    }
+
+    Network(const Address& addr, int prefix)
+        : addr_(addr),
+          prefix_(prefix)
+    {
+    }
+
+    explicit Network(const std::string& addr);
+
+    auto& addr() const { return addr_; }
+    auto prefix() const { return prefix_; }
+
+    /// Return true if the given address matches this network prefix
+    bool matches(const Address& addr);
+
+private:
+    Address addr_;
+    int prefix_;
+};
+
+/// A utility class which can be used to filter requests based on the
+/// source address. The filter has two lists of networks, one for
+/// networks which are allowed to send requests and one for networks
+/// which are not.
+///
+/// An incoming request is first matched against the allow list - if
+/// the list is empty or the source address matches an entry in the
+/// list, the request is then checked against the deny list. If no
+/// entry in the deny list matches, the request is accepted. All other
+/// requests are rejected.
+class Filter
+{
+public:
+    Filter()
+    {
+    }
+
+    Filter(
+        std::initializer_list<Network> allowed,
+        std::initializer_list<Network> denied)
+        : allowed_(allowed),
+          denied_(denied)
+    {
+    }
+
+    /// Add a network which is allowed access. If no networks are
+    /// explicitly allowed, any request is allowed.
+    void allow(const Network& net)
+    {
+        allowed_.push_back(net);
+    }
+
+    /// Add a network which is denied access. If no
+    /// networks are explicitly denied, no requests are denied.
+    void deny(const Network& net)
+    {
+        denied_.push_back(net);
+    }
+
+    /// Return true if a request from the given address is accepted by
+    /// the filter
+    bool check(const Address& addr);
+
+private:
+    std::vector<Network> allowed_;
+    std::vector<Network> denied_;
 };
 
 /// Similar to struct addrinfo but with C++ semantics for allocation
@@ -113,6 +194,7 @@ struct AddressInfo
     static AddressInfo fromUaddr(
         const std::string& uaddr, const std::string& netid);
 
+    std::string host() const;
     std::string uaddr() const;
     std::string netid() const;
     int port() const;

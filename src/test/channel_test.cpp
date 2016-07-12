@@ -30,7 +30,7 @@ public:
     {
         ostringstream ss;
         ss << "unix:///tmp/rpcTest-" << ::getpid() << "-" << id;
-        return Address(ss.str());
+        return Address::fromUrl(ss.str());
     }
 
     void unlinkLocalAddress(const Address& addr)

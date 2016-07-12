@@ -628,6 +628,15 @@ ServiceRegistry::process(CallContext&& ctx)
         return;
     }
 
+    if (filter_) {
+        auto addr = ctx.channel()->remoteAddress().addr;
+        if (!filter_->check(addr)) {
+            VLOG(1) << "Request not authorized from: " << addr.host();
+            ctx.authError(AUTH_TOOWEAK);
+            return;
+        }
+    }
+
     if (!validateAuth(ctx))
         return;
 

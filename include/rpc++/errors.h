@@ -51,6 +51,20 @@ public:
     }
 };
 
+class RestError: public RpcError
+{
+public:
+    RestError(const std::string& what)
+        : RpcError(what)
+    {
+    }
+
+    RestError(const char* what)
+        : RpcError(what)
+    {
+    }
+};
+
 /// Used to force Channel::call to re-send a message after a reconnect
 class ResendMessage: public RpcError
 {

@@ -117,7 +117,7 @@ public:
     LocalDatagramChannel(shared_ptr<ServiceRegistry> svcreg = nullptr)
         : DatagramChannel(::socket(AF_LOCAL, SOCK_DGRAM, 0), svcreg),
           path_(makePath()),
-          addr_("unix://" + path_)
+          addr_(Address::fromUrl("unix://" + path_))
     {
         bind(localAddr());
     }

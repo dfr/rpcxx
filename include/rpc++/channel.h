@@ -29,6 +29,8 @@ class XdrSink;
 class XdrSource;
 class RecordReader;
 class RecordWriter;
+class RestChannel;
+class RestRegistry;
 class ServiceRegistry;
 
 class Message: public XdrMemory
@@ -350,9 +352,16 @@ class StreamChannel: public SocketChannel
 {
 public:
     StreamChannel(int sock);
-    StreamChannel(int sock, std::shared_ptr<ServiceRegistry>);
+    StreamChannel(int sock, std::shared_ptr<ServiceRegistry> svcreg);
+    StreamChannel(
+        int sock,
+        std::shared_ptr<ServiceRegistry> svcreg,
+        std::shared_ptr<RestRegistry> restreg);
 
     ~StreamChannel();
+
+    // Socket overrides
+    bool onReadable(SocketManager* sockman) override;
 
     // Channel overrides
     std::unique_ptr<XdrSink> acquireSendBuffer() override;
@@ -366,6 +375,10 @@ public:
 
 private:
     void readAll(void* buf, size_t len);
+
+    // Optional REST api support
+    std::shared_ptr<RestRegistry> restreg_;
+    std::shared_ptr<RestChannel> restchan_;
 
     // Protects sendbuf_ and sender_
     std::mutex writeMutex_;
@@ -408,6 +421,16 @@ public:
     {
     }
 
+    ListenSocket(
+        int fd,
+        std::shared_ptr<ServiceRegistry> svcreg,
+        std::shared_ptr<RestRegistry> restreg)
+        : Socket(fd),
+          svcreg_(svcreg),
+          restreg_(restreg)
+    {
+    }
+
     /// Return the buffer size for new channels
     auto bufferSize() const { return bufferSize_; }
 
@@ -419,6 +442,7 @@ public:
 
 private:
     std::shared_ptr<ServiceRegistry> svcreg_;
+    std::shared_ptr<RestRegistry> restreg_;
     size_t bufferSize_ = Channel::DEFAULT_BUFFER_SIZE;
 };
 

@@ -21,7 +21,7 @@ TEST(SocketTest, AddressNull)
 
 TEST(SocketTest, AddressPath)
 {
-    Address addr("unix:///foo/bar");
+    auto addr = Address::fromUrl("unix:///foo/bar");
     auto p = reinterpret_cast<const sockaddr_un*>(addr.addr());
     EXPECT_EQ(AF_LOCAL, p->sun_family);
     EXPECT_EQ(SUN_LEN(p), p->sun_len);
@@ -40,7 +40,7 @@ TEST(SocketTest, AddressHostIPv4)
         {"tcp://127.0.0.1",      0,    {{127,0,0,1}}},
     };
     for (auto t: tests) {
-        Address addr(t.url);
+        auto addr = Address::fromUrl(t.url);
         auto p = reinterpret_cast<const sockaddr_in*>(addr.addr());
         EXPECT_EQ(AF_INET, p->sin_family);
         EXPECT_EQ(sizeof(sockaddr_in), p->sin_len);
@@ -66,7 +66,7 @@ TEST(SocketTest, AddressHostIPv6)
     };
 
     for (auto t: tests) {
-        Address addr(t.url);
+        auto addr = Address::fromUrl(t.url);
         auto p = reinterpret_cast<const sockaddr_in6*>(addr.addr());
         EXPECT_EQ(AF_INET6, p->sin6_family);
         EXPECT_EQ(sizeof(sockaddr_in6), p->sin6_len);
@@ -77,14 +77,15 @@ TEST(SocketTest, AddressHostIPv6)
 
 TEST(SocketTest, AddressCompare)
 {
-    EXPECT_NE(Address(), Address("unix:///foo/bar"));
-    EXPECT_EQ(Address("unix:///foo/bar"), Address("unix:///foo/bar"));
+    EXPECT_NE(Address(), Address::fromUrl("unix:///foo/bar"));
+    EXPECT_EQ(Address::fromUrl("unix:///foo/bar"),
+              Address::fromUrl("unix:///foo/bar"));
 }
 
 TEST(SocketTest, AddressCopy)
 {
     Address a;
-    Address b("unix:///foo/bar");
+    Address b = Address::fromUrl("unix:///foo/bar");
     a = b;
     EXPECT_EQ(a, b);
     a = *b.addr();
@@ -163,4 +164,53 @@ TEST(SocketTest, Uaddr)
             EXPECT_EQ(0, memcmp(t.addr.data(), p->sin6_addr.s6_addr, 16));
         }
     }
+}
+
+TEST(SocketTest, NetworkMatch)
+{
+    struct test {
+        string net;
+        string match;
+        bool result;
+    };
+    vector<test> tests = {
+        { "10.11.12.0/24", "10.11.12.13", true },
+        { "10.11.12.16/28", "10.11.12.15", false },
+        { "10.11.12.16/28", "10.11.12.16", true },
+        { "10.11.12.16/28", "10.11.12.17", true },
+        { "1234::/16", "1234::1", true },
+        { "1234:5678::/32", "1234:5678::1", true },
+    };
+
+    for (auto t: tests) {
+        EXPECT_EQ(t.result, Network(t.net).matches(Address(t.match)));
+    }
+}
+
+TEST(SocketTest, FilterEmpty)
+{
+    Filter f;
+    EXPECT_EQ(true, f.check(Address("10.11.12.13")));
+}
+
+TEST(SocketTest, FilterAllow)
+{
+    Filter f({Network("10.11.12.0/24")}, {});
+    EXPECT_EQ(true, f.check(Address("10.11.12.13")));
+    EXPECT_EQ(false, f.check(Address("10.11.13.13")));
+}
+
+TEST(SocketTest, FilterDeny)
+{
+    Filter f({}, {Network("10.11.12.0/24")});
+    EXPECT_EQ(false, f.check(Address("10.11.12.13")));
+    EXPECT_EQ(true, f.check(Address("10.11.13.13")));
+}
+
+TEST(SocketTest, FilterAllowDeny)
+{
+    Filter f({Network("10.11.0.0/16")}, {Network("10.11.12.0/24")});
+    EXPECT_EQ(false, f.check(Address("10.11.12.13")));
+    EXPECT_EQ(true, f.check(Address("10.11.13.13")));
+    EXPECT_EQ(false, f.check(Address("10.12.13.13")));
 }
