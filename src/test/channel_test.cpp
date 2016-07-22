@@ -26,10 +26,11 @@ public:
     {
     }
 
-    Address makeLocalAddress()
+    Address makeLocalAddress(int id)
     {
-        char tmp[] = "/tmp/rpcTestXXXXX";
-        return Address(string("unix://") + mktemp(tmp));
+        ostringstream ss;
+        ss << "unix:///tmp/rpcTest-" << ::getpid() << "-" << id;
+        return Address(ss.str());
     }
 
     void unlinkLocalAddress(const Address& addr)
@@ -424,14 +425,14 @@ TEST_F(ChannelTest, LocalManyThreads)
 TEST_F(ChannelTest, DatagramChannel)
 {
     // Make a local socket to listen on
-    Address saddr = makeLocalAddress();
+    Address saddr = makeLocalAddress(0);
     int ssock = socket(AF_LOCAL, SOCK_DGRAM, 0);
     ASSERT_GE(::bind(ssock, saddr.addr(), saddr.len()), 0);
 
     SimpleDatagramServer server(ssock);
 
     // Make a suitable address for the channel to receive replies
-    Address caddr = makeLocalAddress();
+    Address caddr = makeLocalAddress(1);
 
     // Bind to our reply address and connect to the server address
     int clsock = socket(AF_LOCAL, SOCK_DGRAM, 0);
@@ -451,14 +452,14 @@ TEST_F(ChannelTest, DatagramChannel)
 TEST_F(ChannelTest, DatagramManyThreads)
 {
     // Make a local socket to listen on
-    Address saddr = makeLocalAddress();
+    Address saddr = makeLocalAddress(0);
     int ssock = socket(AF_LOCAL, SOCK_DGRAM, 0);
     ASSERT_GE(::bind(ssock, saddr.addr(), saddr.len()), 0);
 
     SimpleDatagramServer server(ssock);
 
     // Make a suitable address for the channel to receive replies
-    Address caddr = makeLocalAddress();
+    Address caddr = makeLocalAddress(1);
 
     // Bind to our reply address and connect to the server address
     int clsock = socket(AF_LOCAL, SOCK_DGRAM, 0);

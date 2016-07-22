@@ -134,8 +134,10 @@ public:
 
     static string makePath()
     {
-        char tmp[] = "/tmp/rpcTestXXXXX";
-        return mktemp(tmp);
+        static int index = 0;
+        ostringstream ss;
+        ss << "/tmp/rpcTest-" << ::getpid() << "-" << index++;
+        return ss.str();
     }
 
 private:
@@ -268,12 +270,13 @@ TEST_F(ServerTest, Stream)
 TEST_F(ServerTest, Listen)
 {
     // Make a local socket to listen on
-    char tmp[] = "/tmp/rpcTestXXXXX";
-    auto sockname = mktemp(tmp);
+    ostringstream ss;
+    ss << "/tmp/rpcTest-" << ::getpid();
+    auto sockname = ss.str();
     sockaddr_un sun;
     sun.sun_len = sizeof(sun);
     sun.sun_family = AF_LOCAL;
-    strcpy(sun.sun_path, sockname);
+    strcpy(sun.sun_path, sockname.c_str());
     int lsock = socket(AF_LOCAL, SOCK_STREAM, 0);
     ASSERT_GE(::bind(lsock, reinterpret_cast<sockaddr*>(&sun), sizeof(sun)), 0);
     ASSERT_GE(::listen(lsock, 5), 0);
