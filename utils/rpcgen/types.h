@@ -1047,6 +1047,7 @@ public:
     {
         str << indent << "switch (" << prefix
             << discriminant_.first << ") {" << endl;
+        bool hasDefault = false;
         for (const auto& field: fields_) {
             if (field.values_.size() > 0) {
                 for (const auto& val: field.values_) {
@@ -1054,10 +1055,17 @@ public:
                 }
             }
             else {
+                hasDefault = true;
                 str << indent << "default:" << endl;
             }
             ++indent;
             fn(indent, field.decl_.first, field.decl_.second);
+            str << indent << "break;" << endl;
+            --indent;
+        }
+        if (!hasDefault) {
+            str << indent << "default:" << endl;
+            ++indent;
             str << indent << "break;" << endl;
             --indent;
         }
