@@ -33,7 +33,7 @@ cc_test(
     srcs = glob(["test/*.cpp"]) + [":test_client"],
     deps = [":genlib",
             "//:rpcxx",
-            "//third_party/gtest:gtest_main"],
+            "//external:gtest_main"],
     linkopts = select({
         ":freebsd": ["-lm"],
         ":darwin": [],

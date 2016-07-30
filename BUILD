@@ -9,7 +9,7 @@ cc_library(
     srcs = glob([
             "src/*.cpp",
             "include/rpc++/*.h"]),
-    deps = ["//third_party/glog:glog"],
+    deps = ["//external:glog"],
     includes = ["include"],
     visibility = ["//visibility:public"],
     linkopts = select({
@@ -35,9 +35,9 @@ cc_test(
     srcs = glob(["src/test/*.cpp"]),
     deps = [
         ":rpcxx",
-        "//third_party/gflags",
-        "//third_party/glog",
-        "//third_party/gtest"
+        "//external:gflags",
+        "//external:glog",
+        "//external:gtest"
     ],
     linkstatic = 1,
     linkopts = select({
