@@ -6,17 +6,23 @@
 cc_library(
     name = "rpcxx",
     copts = ["-std=c++14"],
-    srcs = glob([
-            "src/*.cpp",
-            "include/rpc++/*.h"]),
-    deps = ["//external:glog"],
-    includes = ["include"],
+    srcs = glob(["src/*.cpp"]),
+    deps = [
+        ":hdrs",
+        "//external:glog"
+    ],
     visibility = ["//visibility:public"],
     linkopts = select({
         ":freebsd": ["-pthread", "-lgssapi", "-lm"],
         ":darwin": ["-framework GSS", "-framework CoreFoundation"],
     }),
+    includes = ["include"],
     linkstatic = 1
+)
+
+cc_inc_library(
+    name = "hdrs",
+    hdrs = glob([ "include/rpc++/*.h"]),
 )
 
 test_suite(
