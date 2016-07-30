@@ -13,8 +13,9 @@
 
 namespace oncrpc {
 
-struct UrlParser
+class UrlParser
 {
+public:
     UrlParser();
     UrlParser(const std::string& url);
     void parse(const std::string& url);
