@@ -37,6 +37,7 @@ cc_library(
         "-DHAVE_SIGALTSTACK",
         "-DHAVE_STDINT_H",
         "-DHAVE_STRING_H",
+        "-DHAVE_SYS_SYSCALL_H",
         "-DHAVE_SYS_TIME_H",
         "-DHAVE_SYS_TYPES_H",
         "-DHAVE_SYS_UCONTEXT_H",
