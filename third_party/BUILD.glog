@@ -19,6 +19,7 @@ cc_library(
         "-DHAVE_DLADDR",
         "-DHAVE_SNPRINTF",
         "-DHAVE_DLFCN_H",
+        "-DHAVE_EXECINFO_H",
         "-DHAVE_FCNTL",
         "-DHAVE_GLOB_H",
         "-DHAVE_INTTYPES_H",
@@ -44,8 +45,8 @@ cc_library(
         "-DHAVE_SYS_UTSNAME_H",
         "-DHAVE_UNISTD_H",
         "-DHAVE_USING_OPERATOR",
-        "-DHAVE_HAVE___ATTRIBUTE___",
-        "-DHAVE_HAVE___BUILTIN_EXPECT",
+        "-DHAVE___ATTRIBUTE__",
+        "-DHAVE___BUILTIN_EXPECT",
         #"-DNO_FRAME_POINTER",
         "-D_GNU_SOURCE",
         #"-fno-sanitize=thread",
@@ -79,10 +80,15 @@ cc_library(
         "src/base/mutex.h",
         "src/glog/log_severity.h",
     ],
-    linkopts = [
-        #"-pthread",
-        #"-L/usr/local/lib -lunwind",
-    ],
+    linkopts = select({
+        ":freebsd": ["-lexecinfo"],
+        "//conditions:default": []
+    }),
+)
+
+config_setting(
+    name = "freebsd",
+    values = {"cpu": "freebsd"},
 )
 
 genrule(
