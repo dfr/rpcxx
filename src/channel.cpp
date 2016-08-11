@@ -963,7 +963,9 @@ StreamChannel::sendMessage(std::unique_ptr<XdrSink>&& xdrs)
 
     std::unique_lock<std::mutex> lock(writeMutex_);
     VLOG(3) << "writing " << len << " bytes to socket";
-    auto bytes = Socket::send(iov);
+    // This cast shouldn't be necessary but clang-3.8 gets confused
+    // since send appears as a method in both Channel and Socket
+    auto bytes = static_cast<Socket*>(this)->send(iov);
     if (bytes == 0)
         throw std::system_error(ENOTCONN, std::system_category());
 
