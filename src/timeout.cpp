@@ -26,8 +26,8 @@ TimeoutManager::update(clock_type::time_point now)
 {
     std::unique_lock<std::mutex> lock(mutex_);
     while (queue_.size() > 0 && now >= queue_.front().when) {
-        auto task = std::move(queue_.front());
         std::pop_heap(queue_.begin(), queue_.end(), Comp());
+        auto task = std::move(queue_.back());
         queue_.pop_back();
         lock.unlock();
         VLOG(3) << "calling timeout function";
