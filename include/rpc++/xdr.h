@@ -176,6 +176,14 @@ public:
     {
     }
 
+    /// A buffer containing a copy of the string
+    explicit Buffer(const std::string& s)
+        : Buffer(s.size())
+    {
+        std::copy_n(
+            reinterpret_cast<const uint8_t*>(s.data()), s.size(), data());
+    }
+
     auto begin() const { return data_; }
     auto end() const { return data_ + size_; }
     size_t size() const { return size_; }
