@@ -285,11 +285,7 @@ public:
     virtual bool onReadable(SocketManager* sockman) { return false; }
 
     /// Bind the local address
-    virtual void bind(const Address& addr)
-    {
-        if (::bind(fd_, addr.addr(), addr.len()) < 0)
-            throw std::system_error(errno, std::system_category());
-    }
+    virtual void bind(const Address& addr);
 
     /// Listen for connections
     virtual void listen()

@@ -227,7 +227,6 @@ void Address::copyFrom(const sockaddr& sa)
         // Try to ensure the path is null terminated
         if (sa.sa_len < sizeof(sockaddr_un))
             reinterpret_cast<char*>(&addr_)[sa.sa_len] = 0;
-        
     }
 }
 
@@ -700,4 +699,37 @@ Socket::close()
         ::close(fd_);
         fd_ = -1;
     }
+}
+
+void
+Socket::bind(const Address& addr)
+{
+    auto family = addr.addr()->sa_family;
+    if (family == AF_INET6) {
+        sockaddr_in6* sin6p = (sockaddr_in6*) addr.addr();
+        if (IN6_IS_ADDR_MULTICAST(&sin6p->sin6_addr)) {
+            struct ipv6_mreq mreq;
+            mreq.ipv6mr_multiaddr = sin6p->sin6_addr;
+            mreq.ipv6mr_interface = 0;
+            auto res = ::setsockopt(
+                fd_, IPPROTO_IPV6, IPV6_JOIN_GROUP, &mreq, sizeof(mreq));
+            if (res < 0)
+                throw std::system_error(errno, std::system_category());
+        }
+    }
+    else if (family == AF_INET) {
+        sockaddr_in* sinp = (sockaddr_in*) addr.addr();
+        if (IN_MULTICAST(ntohl(sinp->sin_addr.s_addr))) {
+            struct ip_mreq mreq;
+            mreq.imr_multiaddr = sinp->sin_addr;
+            mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+            auto res = ::setsockopt(
+                fd_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq));
+            if (res < 0)
+                throw std::system_error(errno, std::system_category());
+        }
+    }
+
+    if (::bind(fd_, addr.addr(), addr.len()) < 0)
+        throw std::system_error(errno, std::system_category());
 }
