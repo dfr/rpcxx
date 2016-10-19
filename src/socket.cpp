@@ -536,7 +536,8 @@ SocketManager::run()
 {
     std::unique_lock<std::mutex> lock(mutex_);
     running_ = true;
-    while (sockets_.size() > 0 && !stopping_) {
+    stopping_ = false;
+    while (!stopping_) {
         auto idleLimit = clock_type::now() - idleTimeout_;
         std::vector<std::shared_ptr<Socket>> idle;
         fd_set rset;

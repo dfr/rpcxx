@@ -243,6 +243,7 @@ TEST_F(GssTest, StreamManyThreads)
         t.join();
 
     cchan->close();
+    sockman.stop();
     t.join();
 }
 

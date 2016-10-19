@@ -260,10 +260,7 @@ TEST_F(ServerTest, Stream)
         [](XdrSink* xdrs) { uint32_t v = 123; xdr(v, xdrs); },
         [](XdrSource* xdrs) { uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
 
-    // Close this side of the socket pair which should prompt the
-    // connection registry to stop when it notices the end-of-file
-    chan->close();
-    chan.reset();
+    sockman->stop();
     server.join();
 }
 
@@ -297,12 +294,7 @@ TEST_F(ServerTest, Listen)
         [](XdrSink* xdrs) { uint32_t v = 123; xdr(v, xdrs); },
         [](XdrSource* xdrs) { uint32_t v; xdr(v, xdrs); EXPECT_EQ(v, 123); });
 
-    // Close this side of the socket pair. The connection registry
-    // won't stop running automatically since the listen socket is
-    // still valid so we tell it to stop.
     sockman->stop();
-    chan->close();
-    chan.reset();
     server.join();
 
     EXPECT_GE(::unlink(sun.sun_path), 0);
