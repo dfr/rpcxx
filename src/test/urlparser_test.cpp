@@ -51,16 +51,23 @@ TEST_F(UrlParserTest, Query)
 {
     UrlParser p("file://some/path?foo=bar&bar=baz");
     EXPECT_EQ("some/path", p.path);
-    EXPECT_EQ("bar", p.query["foo"]);
-    EXPECT_EQ("baz", p.query["bar"]);
+    EXPECT_EQ("bar", p.query.find("foo")->second);
+    EXPECT_EQ("baz", p.query.find("bar")->second);
 
     UrlParser p2("file://some/path?foo=bar;bar=baz");
     EXPECT_EQ("some/path", p2.path);
-    EXPECT_EQ("bar", p2.query["foo"]);
-    EXPECT_EQ("baz", p2.query["bar"]);
+    EXPECT_EQ("bar", p2.query.find("foo")->second);
+    EXPECT_EQ("baz", p2.query.find("bar")->second);
 
     UrlParser p3("tcp://host?foo=bar");
     EXPECT_EQ("host", p3.host);
     EXPECT_EQ("", p3.path);
-    EXPECT_EQ("bar", p3.query["foo"]);
+    EXPECT_EQ("bar", p3.query.find("foo")->second);
+
+    UrlParser p4("tcp://host?foo=1&foo=2&foo=3");
+    auto range = p4.query.equal_range("foo");
+    auto i = range.first;
+    EXPECT_EQ("1", i->second); ++i;
+    EXPECT_EQ("2", i->second); ++i;
+    EXPECT_EQ("3", i->second); ++i;
 }

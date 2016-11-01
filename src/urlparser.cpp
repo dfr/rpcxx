@@ -239,10 +239,10 @@ void UrlParser::parseQueryTerm(const std::string& s)
 {
     auto i = s.find('=');
     if (i == std::string::npos) {
-        query[s] = "true";
+        query.insert(make_pair(s, "true"));
     }
     else {
-        query[s.substr(0, i)] = s.substr(i + 1);
+        query.insert(make_pair(s.substr(0, i), s.substr(i + 1)));
     }
 }
 

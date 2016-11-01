@@ -41,7 +41,7 @@ public:
     std::string port;
     std::string path;
     std::vector<std::string> segments;
-    std::map<std::string, std::string> query;
+    std::multimap<std::string, std::string> query;
 
 private:
     static std::unordered_set<std::string> hostbasedSchemes;
