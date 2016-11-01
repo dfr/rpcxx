@@ -115,7 +115,8 @@ public:
     /// Helper function for creating and opening channels
     static std::shared_ptr<Channel> open(const AddressInfo& ai);
     static std::shared_ptr<Channel> open(
-        const std::vector<AddressInfo>& addrs);
+        const std::vector<AddressInfo>& addrs,
+        bool connectAll = false);
     static std::shared_ptr<Channel> open(
         const std::string& host, uint32_t prog, uint32_t vers,
         const std::string& netid);
@@ -123,7 +124,8 @@ public:
         const std::string& host, const std::string& service,
         const std::string& netid);
     static std::shared_ptr<Channel> open(
-        const std::string& url, const std::string& netid = "");
+        const std::string& url, const std::string& netid = "",
+        bool connectAll = false);
 
     /// Create an RPC channel
     Channel();
@@ -313,7 +315,9 @@ public:
     DatagramChannel(int sock);
     DatagramChannel(int sock, std::shared_ptr<ServiceRegistry>);
 
-    // Socket overrides
+    // Socket overrides - we allow the channel to be 'connected' to
+    // multiple addresses to emulate multicast in environments which
+    // don't support it
     void connect(const Address& addr) override;
 
     // Channel overrides
@@ -327,7 +331,7 @@ public:
     AddressInfo remoteAddress() const override;
 
 protected:
-    Address remoteAddr_;
+    std::vector<Address> remoteAddrs_;
     std::unique_ptr<Message> xdrs_;
 };
 
@@ -337,7 +341,7 @@ public:
     DatagramReplyChannel(int fd_, const Address& addr)
         : DatagramChannel(fd_)
     {
-        remoteAddr_ = addr;
+        remoteAddrs_.push_back(addr);
     }
 
     ~DatagramReplyChannel()

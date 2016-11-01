@@ -131,17 +131,42 @@ std::shared_ptr<Channel> Channel::open(const AddressInfo& ai)
     }
 }
 
-std::shared_ptr<Channel> Channel::open(const std::vector<AddressInfo>& addrs)
+std::shared_ptr<Channel> Channel::open(
+    const std::vector<AddressInfo>& addrs, bool connectAll)
 {
     std::exception_ptr lastError;
     assert(addrs.size() > 0);
-    for (auto& ai: addrs) {
-        try {
-            auto chan = Channel::open(ai);
-            return chan;
+    if (connectAll) {
+        std::shared_ptr<Channel> chan;
+        for (auto& ai: addrs) {
+            try {
+                if (chan) {
+                    auto dgchan =
+                        std::dynamic_pointer_cast<DatagramChannel>(chan);
+                    assert(dgchan);
+                    dgchan->connect(ai.addr);
+                }
+                else {
+                    assert(ai.socktype == SOCK_DGRAM);
+                    chan = oncrpc::Channel::open(ai);
+                }
+            }
+            catch (std::system_error& e) {
+                lastError = std::current_exception();
+            }
         }
-        catch (std::system_error& e) {
-            lastError = std::current_exception();
+        if (chan)
+            return chan;
+    }
+    else {
+        for (auto& ai: addrs) {
+            try {
+                auto chan = Channel::open(ai);
+                return chan;
+            }
+            catch (std::system_error& e) {
+                lastError = std::current_exception();
+            }
         }
     }
     std::rethrow_exception(lastError);
@@ -167,7 +192,7 @@ std::shared_ptr<Channel> Channel::open(
 }
 
 std::shared_ptr<Channel> Channel::open(
-    const std::string& url, const std::string& netid)
+    const std::string& url, const std::string& netid, bool connectAll)
 {
     return Channel::open(getAddressInfo(url, netid));
 }
@@ -791,7 +816,7 @@ DatagramChannel::DatagramChannel(
 void
 DatagramChannel::connect(const Address& addr)
 {
-    remoteAddr_ = addr;
+    remoteAddrs_.push_back(addr);
 }
 
 std::unique_ptr<XdrSink>
@@ -823,7 +848,8 @@ DatagramChannel::sendMessage(std::unique_ptr<XdrSink>&& xdrs)
 {
     std::unique_ptr<Message> msg(static_cast<Message*>(xdrs.release()));
     msg->flush();
-    sendto(msg->iov(), remoteAddr_);
+    for (auto& addr: remoteAddrs_)
+        sendto(msg->iov(), addr);
     releaseSendBuffer(std::move(msg));
 }
 
@@ -875,11 +901,12 @@ DatagramChannel::releaseReceiveBuffer(std::unique_ptr<XdrSource>&& xdrs)
 AddressInfo
 DatagramChannel::remoteAddress() const
 {
+    auto& addr = remoteAddrs_[0];
     AddressInfo ai;
-    ai.family = remoteAddr_.addr()->sa_family;
+    ai.family = addr.addr()->sa_family;
     ai.socktype = SOCK_DGRAM;
     ai.protocol = 0;
-    ai.addr = remoteAddr_;
+    ai.addr = addr;
     return ai;
 }
 
