@@ -205,16 +205,16 @@ std::shared_ptr<RestResponse> RestRegistry::process(
                 }
                 if (!enc) {
                     enc = std::make_unique<JsonEncoder>(ss, pretty);
-                    bool handled;
-                    if (req->method() == "GET")
-                        handled = ep->handler->get(req, std::move(enc));
-                    else
-                        handled = ep->handler->post(req, std::move(enc));
-                    if (handled) {
-                        enc.reset();
-                        res->setBody(ss.str(), "application/json");
-                        return res;
-                    }
+                }
+                bool handled;
+                if (req->method() == "GET")
+                    handled = ep->handler->get(req, std::move(enc));
+                else
+                    handled = ep->handler->post(req, std::move(enc));
+                if (handled) {
+                    enc.reset();
+                    res->setBody(ss.str(), "application/json");
+                    return res;
                 }
             }
             else if (ep->content) {
