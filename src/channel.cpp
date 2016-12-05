@@ -492,7 +492,7 @@ void Channel::send(
     Protection prot)
 {
     uint32_t xid;
-    auto txp = new Transaction;
+    auto txp = std::make_unique<Transaction>();
     auto& tx = *txp;
 
     int gen;
