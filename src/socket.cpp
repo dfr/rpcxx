@@ -520,6 +520,9 @@ SocketManager::add(std::shared_ptr<Socket> sock)
 {
     VLOG(3) << "adding socket " << sock;
     std::unique_lock<std::mutex> lock(mutex_);
+    if (sock->fd() >= FD_SETSIZE) {
+        LOG(FATAL) << "file descriptor too large for select: " << sock->fd();
+    }
     sockets_[sock] = clock_type::now();
 }
 
