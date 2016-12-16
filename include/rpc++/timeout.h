@@ -22,6 +22,11 @@ public:
     typedef std::chrono::system_clock clock_type;
     typedef int task_type;
 
+    virtual ~TimeoutManager()
+    {
+        queue_.clear();
+    }
+
     virtual task_type add(
         clock_type::time_point when, std::function<void()> what);
     void update(clock_type::time_point now);

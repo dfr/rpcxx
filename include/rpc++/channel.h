@@ -197,7 +197,7 @@ public:
     /// Return the channel's service registry, if any
     std::shared_ptr<ServiceRegistry> serviceRegistry() const
     {
-        return svcreg_;
+        return svcreg_.lock();
     }
 
     /// Set the service registry to use for handlng calls on this
@@ -264,7 +264,7 @@ protected:
     std::mutex mutex_;
     bool running_ = false;      // true if a thread is reading
     std::unordered_map<uint32_t, Transaction*> pending_; // in-flight calls
-    std::shared_ptr<ServiceRegistry> svcreg_;
+    std::weak_ptr<ServiceRegistry> svcreg_;
     TimeoutManager* tman_ = nullptr;  // XXX: observer_ptr
 };
 
@@ -381,7 +381,7 @@ private:
     void readAll(void* buf, size_t len);
 
     // Optional REST api support
-    std::shared_ptr<RestRegistry> restreg_;
+    std::weak_ptr<RestRegistry> restreg_;
     std::shared_ptr<RestChannel> restchan_;
 
     // Protects sendbuf_ and sender_
@@ -445,8 +445,8 @@ public:
     bool onReadable(SocketManager* sockman) override;
 
 private:
-    std::shared_ptr<ServiceRegistry> svcreg_;
-    std::shared_ptr<RestRegistry> restreg_;
+    std::weak_ptr<ServiceRegistry> svcreg_;
+    std::weak_ptr<RestRegistry> restreg_;
     size_t bufferSize_ = Channel::DEFAULT_BUFFER_SIZE;
 };
 

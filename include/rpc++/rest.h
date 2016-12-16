@@ -217,8 +217,7 @@ private:
         PROCESS
     };
 
-    std::shared_ptr<RestRegistry> restreg_;
-    std::shared_ptr<Socket> sock_;
+    std::weak_ptr<RestRegistry> restreg_;
     std::deque<char> buffer_;
     std::shared_ptr<RestRequest> req_;
     size_t size_;               // Content-Length or chunk size

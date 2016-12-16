@@ -554,6 +554,7 @@ bool Channel::processIncomingMessage(
             return false;
     }
 
+    auto svcreg = svcreg_.lock();
     rpc_msg msg;
     try {
         xdr(msg, static_cast<XdrSource*>(body.get()));
@@ -592,9 +593,9 @@ bool Channel::processIncomingMessage(
             return true;
         }
     }
-    else if (msg.mtype == CALL && svcreg_) {
+    else if (msg.mtype == CALL && svcreg) {
         lock.unlock();
-        svcreg_->process(
+        svcreg->process(
             CallContext(std::move(msg), std::move(body), replyChan));
         lock.lock();
         return true;
@@ -722,7 +723,7 @@ LocalChannel::sendMessage(std::unique_ptr<XdrSink>&& xdrs)
     if (mtype == CALL) {
         rpc_msg call_msg;
         xdr(call_msg, static_cast<XdrSource*>(msg.get()));
-        svcreg_->process(
+        svcreg_.lock()->process(
             CallContext(
                 std::move(call_msg), std::move(msg), shared_from_this()));
     }
@@ -1033,7 +1034,7 @@ StreamChannel::receiveMessage(
         uint32_t reclen = rec & 0x7fffffff;
         if (total + reclen > bufferSize_) {
             // Check for a possible REST connection
-            if (restreg_) {
+            if (restreg_.lock()) {
                 std::array<char, 4> data;
                 data[0] = recbuf[0];
                 data[1] = recbuf[1];
@@ -1045,7 +1046,7 @@ StreamChannel::receiveMessage(
                     data == std::array<char, 4>{{'D','E','L','E'}} ||
                     data == std::array<char, 4>{{'H','E','A','D'}}) {
                     VLOG(2) << "Treating channel as REST endpoint";
-                    restchan_ = std::make_shared<RestChannel>(restreg_, data);
+                    restchan_ = std::make_shared<RestChannel>(restreg_.lock(), data);
                     // Throw a system_error to unwind back to
                     // StreamChannel::onReadable which will detect
                     // that we are treating this channel as a REST
@@ -1175,7 +1176,8 @@ ListenSocket::onReadable(SocketManager* sockman)
     VLOG(3) << "New connection fd: " << newsock;
     int one = 1;
     ::setsockopt(newsock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-    auto chan = std::make_shared<StreamChannel>(newsock, svcreg_, restreg_);
+    auto chan = std::make_shared<StreamChannel>(
+        newsock, svcreg_.lock(), restreg_.lock());
     chan->setCloseOnIdle(true);
     chan->setBufferSize(bufferSize_);
     sockman->add(chan);

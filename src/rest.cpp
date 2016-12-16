@@ -103,7 +103,8 @@ static auto ASCTIME_FMT = "%a %b %d %H:%M:%S %Y";
 
 static std::string formatTime(std::time_t t)
 {
-    auto tm = *std::gmtime(&t);
+    struct tm tmbuf;
+    auto tm = *gmtime_r(&t, &tmbuf);
     std::ostringstream ss;
     ss << std::put_time(&tm, IMF_FIXDATE_FMT);
     return ss.str();
@@ -536,7 +537,7 @@ bool RestChannel::onReadable(Socket* sock)
             if (it != attrs.end() && it->second == "close")
                 needClose = true;
 
-            auto res = restreg_->process(req_);
+            auto res = restreg_.lock()->process(req_);
             req_.reset();
             state_ = IDLE;
 
