@@ -338,9 +338,15 @@ static inline int fromHexChar(char ch)
 bool RestChannel::onReadable(Socket* sock)
 {
     uint8_t buf[1024];
-    auto bytes = sock->recv(buf, sizeof(buf));
-    if (bytes == 0)
+    ssize_t bytes;
+    try {
+        bytes = sock->recv(buf, sizeof(buf));
+        if (bytes == 0)
+            return false;
+    }
+    catch (std::system_error& e) {
         return false;
+    }
     buffer_.insert(buffer_.end(), buf, buf + bytes);
 
     // All states except PROCESS need to read from the buffer
