@@ -327,7 +327,22 @@ Channel::call(
             lock.lock();
             continue;
         }
-        sendMessage(std::move(xdrout));
+        try {
+            sendMessage(std::move(xdrout));
+        }
+        catch (ResendMessage&) {
+            VLOG(3) << "xid: " << xid
+                    << ": channel reconnected, resending";
+            lock.lock();
+            pending_.erase(xid);
+            continue;
+        }
+        catch (std::runtime_error& e) {
+            LOG(INFO) << "xid: " << xid << " error sending: " << e.what();
+            lock.lock();
+            pending_.erase(xid);
+            throw;
+        }
         lock.lock();
 
 	auto sendTime = now;
@@ -386,6 +401,12 @@ Channel::call(
                             i.second->cv.notify_one();
                         }
                         break;
+                    }
+                    catch (std::runtime_error& e) {
+                        LOG(INFO) << "xid: " << xid
+                                  << " error receiving: " << e.what();
+                        pending_.erase(xid);
+                        throw;
                     }
                     running_ = false;
                 }
@@ -795,6 +816,10 @@ SocketChannel::onReadable(SocketManager* sockman)
         running_ = false;
         return false;
     }
+    catch (ResendMessage& e) {
+        running_ = false;
+        return false;
+    }
     catch (XdrError& e) {
         running_ = false;
         return false;
@@ -1122,6 +1147,7 @@ ReconnectChannel::send(const std::vector<iovec>& iov)
         }
         catch (std::system_error&) {
             reconnect();
+            throw ResendMessage();
         }
     }
 }
