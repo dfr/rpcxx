@@ -1,12 +1,12 @@
 #-
-# Copyright (c) 2016 Doug Rabson
+# Copyright (c) 2016-2017 Doug Rabson
 # All rights reserved.
 #
 
 import os
 import os.path
 
-notice = ['Copyright (c) 2016 Doug Rabson',
+notice = ['Copyright (c) 2016-2017 Doug Rabson',
           'All rights reserved.']
 
 def exclude(dir):
