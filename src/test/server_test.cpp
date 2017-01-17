@@ -11,6 +11,7 @@
 #include <rpc++/client.h>
 #include <rpc++/rpcproto.h>
 #include <rpc++/server.h>
+#include <rpc++/sockman.h>
 #include <rpc++/xdr.h>
 #include <gtest/gtest.h>
 #include <glog/logging.h>

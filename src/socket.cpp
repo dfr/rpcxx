@@ -503,151 +503,6 @@ AddressInfo AddressInfo::fromUaddr(
     return ai;
 }
 
-SocketManager::SocketManager()
-    : idleTimeout_(std::chrono::seconds(30))
-{
-    ::pipe(pipefds_);
-}
-
-SocketManager::~SocketManager()
-{
-    ::close(pipefds_[0]);
-    ::close(pipefds_[1]);
-}
-
-void
-SocketManager::add(std::shared_ptr<Socket> sock)
-{
-    VLOG(3) << "adding socket " << sock;
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (sock->fd() >= FD_SETSIZE) {
-        LOG(FATAL) << "file descriptor too large for select: " << sock->fd();
-    }
-    sockets_[sock] = clock_type::now();
-}
-
-void
-SocketManager::remove(std::shared_ptr<Socket> sock)
-{
-    VLOG(3) << "removing socket " << sock;
-    std::unique_lock<std::mutex> lock(mutex_);
-    sockets_.erase(sock);
-}
-
-void
-SocketManager::run()
-{
-    std::unique_lock<std::mutex> lock(mutex_);
-    running_ = true;
-    stopping_ = false;
-    while (!stopping_) {
-        auto idleLimit = clock_type::now() - idleTimeout_;
-        std::vector<std::shared_ptr<Socket>> idle;
-        fd_set rset;
-        int maxfd = pipefds_[0];
-        FD_ZERO(&rset);
-        FD_SET(pipefds_[0], &rset);
-        for (const auto& i: sockets_) {
-            if (i.first->closeOnIdle() &&
-		i.second < idleLimit) {
-                VLOG(3) << "idle timeout for socket " << i.first->fd();
-                idle.push_back(i.first);
-                continue;
-            }
-            int fd = i.first->fd();
-            if (fd < 0)
-                continue;
-            maxfd = std::max(maxfd, fd);
-            FD_SET(fd, &rset);
-        }
-        lock.unlock();
-
-        for (auto sock: idle) {
-            remove(sock);
-        }
-        idle.clear();
-
-        auto stopTime = next();
-        auto now = clock_type::now();
-        auto timeout =
-            std::chrono::duration_cast<std::chrono::system_clock::duration>(
-                std::chrono::duration_cast<std::chrono::microseconds>(
-                    stopTime - now));
-        if (timeout > idleTimeout_)
-            timeout = idleTimeout_;
-        if (timeout.count() < 0)
-            timeout = std::chrono::seconds(0);
-        auto sec = timeout.count() / 1000000;
-        auto usec = timeout.count() % 1000000;
-        if (sec > 999999)
-            sec = 999999; //std::numeric_limits<int>::max();
-        VLOG(3) << "sleeping for " << sec << "." << usec << "s";
-        ::timeval tv { int(sec), int(usec) };
-        auto nready = ::select(maxfd + 1, &rset, nullptr, nullptr, &tv);
-        if (nready < 0) {
-            if (errno == EBADF || errno == EINTR) {
-                lock.lock();
-                continue;
-            }
-            throw std::system_error(errno, std::system_category());
-        }
-
-        // Execute timeouts, if any
-        now = clock_type::now();
-        update(now);
-
-        lock.lock();
-        if (nready == 0) {
-            continue;
-        }
-
-        if (FD_ISSET(pipefds_[0], &rset)) {
-            char ch;
-            ::read(pipefds_[0], &ch, 1);
-            continue;
-        }
-
-        std::vector<std::shared_ptr<Socket>> ready;
-        for (auto& i: sockets_) {
-            if (FD_ISSET(i.first->fd(), &rset)) {
-                i.second = now;
-                ready.push_back(i.first);
-            }
-        }
-        lock.unlock();
-
-        for (auto sock: ready) {
-            if (!sock->onReadable(this))
-                remove(sock);
-        }
-
-        lock.lock();
-    }
-    running_ = false;
-}
-
-void
-SocketManager::stop()
-{
-    std::unique_lock<std::mutex> lock(mutex_);
-    stopping_ = true;
-    char ch = 0;
-    ::write(pipefds_[1], &ch, 1);
-}
-
-TimeoutManager::task_type
-SocketManager::add(
-    clock_type::time_point when, std::function<void()> what)
-{
-    auto tid = TimeoutManager::add(when, what);
-    std::unique_lock<std::mutex> lock(mutex_);
-    if (running_) {
-        char ch = 0;
-        ::write(pipefds_[1], &ch, 1);
-    }
-    return tid;
-}
-
 Socket::~Socket()
 {
     close();
@@ -703,6 +558,12 @@ Socket::close()
         ::close(fd_);
         fd_ = -1;
     }
+}
+
+void
+Socket::setFd(int fd)
+{
+    fd_ = fd;
 }
 
 void

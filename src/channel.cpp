@@ -18,6 +18,7 @@
 #include <rpc++/rec.h>
 #include <rpc++/rest.h>
 #include <rpc++/server.h>
+#include <rpc++/sockman.h>
 #include <rpc++/xdr.h>
 
 using namespace oncrpc;
@@ -911,7 +912,7 @@ DatagramChannel::receiveMessage(
     // We could try to cache reply channels here but there is little point
     // since the allocation is cheap and datagram sockets are discouraged
     // for high-performance applications
-    replyChan = std::make_shared<DatagramReplyChannel>(fd_, addr);
+    replyChan = std::make_shared<DatagramReplyChannel>(fd(), addr);
     return std::move(msg);
 }
 
@@ -1171,21 +1172,24 @@ void
 ReconnectChannel::reconnect()
 {
     LOG(INFO) << "reconnecting channel";
-    if (fd_ >= 0)
-        ::close(fd_);
+    if (fd() >= 0)
+        ::close(fd());
     try {
-        fd_ = ::socket(
+        int fd = ::socket(
             addrinfo_.family, addrinfo_.socktype, addrinfo_.protocol);
-        if (fd_ < 0)
+        if (fd < 0)
             throw std::system_error(errno, std::system_category());
+        setFd(fd);
+        auto sockman = owner();
+        if (sockman) {
+            auto sock = std::dynamic_pointer_cast<Socket>(shared_from_this());
+            sockman->changed(sock);
+        }
         connect(addrinfo_.addr);
     }
     catch (std::system_error& e) {
         LOG(ERROR) << "reconnect failed: " << e.what();
-        if (fd_ >= 0) {
-            ::close(fd_);
-            fd_ = -1;
-        }
+        close();
         throw;
     }
     reconnectCallback_();
@@ -1196,7 +1200,7 @@ ListenSocket::onReadable(SocketManager* sockman)
 {
     sockaddr_storage ss;
     socklen_t len = sizeof(ss);
-    auto newsock = ::accept(fd_, reinterpret_cast<sockaddr*>(&ss), &len);
+    auto newsock = ::accept(fd(), reinterpret_cast<sockaddr*>(&ss), &len);
     if (newsock < 0)
         throw std::system_error(errno, std::system_category());
     VLOG(3) << "New connection fd: " << newsock;

@@ -347,7 +347,7 @@ public:
     ~DatagramReplyChannel()
     {
         // Don't close the socket
-        fd_ = -1;
+        setFd(-1);
     }
 };
 

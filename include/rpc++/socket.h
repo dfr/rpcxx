@@ -8,10 +8,8 @@
 #pragma once
 
 #include <chrono>
-#include <cstring>
 #include <string>
-#include <thread>
-#include <unordered_map>
+#include <system_error>
 #include <vector>
 
 #include <netdb.h>
@@ -19,8 +17,6 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/uio.h>
-
-#include <rpc++/timeout.h>
 
 namespace oncrpc {
 
@@ -210,39 +206,7 @@ std::vector<AddressInfo> getAddressInfo(
     const std::string& url,
     const std::string& nettype = "");
 
-
-class Socket;
-
-class SocketManager: public TimeoutManager
-{
-public:
-    SocketManager();
-    ~SocketManager();
-
-    void add(std::shared_ptr<Socket> conn);
-
-    void remove(std::shared_ptr<Socket> conn);
-
-    void run();
-
-    void stop();
-
-    auto idleTimeout() const { return idleTimeout_; }
-    void setIdleTimeout(clock_type::duration d) { idleTimeout_ = d; }
-
-    // TimeoutManager overrides
-    task_type add(
-        clock_type::time_point when, std::function<void()> what) override;
-
-private:
-    std::mutex mutex_;
-    bool running_ = false;
-    bool stopping_ = false;
-    std::unordered_map<
-        std::shared_ptr<Socket>, clock_type::time_point> sockets_;
-    int pipefds_[2];
-    clock_type::duration idleTimeout_;
-};
+class SocketManager;
 
 class Socket
 {
@@ -279,6 +243,10 @@ public:
 
     /// Return the OS file descriptor for the socket
     int fd() const { return fd_; }
+
+    /// Change the socket file descriptor (e.g. when reconnecting a
+    /// socket)
+    void setFd(int fd);
 
     /// Called from SocketManager::run when the socket is readable. Return
     /// true if the socket is still active or false if it should be closed
@@ -369,9 +337,17 @@ public:
         return Address(reinterpret_cast<const sockaddr&>(ss));
     }
 
-protected:
+    auto owner() const { return owner_.lock(); }
+
+    void setOwner(std::shared_ptr<SocketManager> owner)
+    {
+        owner_ = owner;
+    }
+
+private:
     int fd_;
     bool closeOnIdle_ = false;
+    std::weak_ptr<SocketManager> owner_;
 };
 
 }

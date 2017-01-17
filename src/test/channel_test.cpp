@@ -10,6 +10,7 @@
 #include <rpc++/client.h>
 #include <rpc++/errors.h>
 #include <rpc++/server.h>
+#include <rpc++/sockman.h>
 #include <gtest/gtest.h>
 #include <glog/logging.h>
 
@@ -604,15 +605,15 @@ TEST_F(ChannelTest, StreamCallAsync)
     auto chan = make_shared<StreamChannel>(clsock);
 
     // Read replies asynchronously using a SockerManager.
-    SocketManager sockman;
-    sockman.add(chan);
-    thread t([&]() { sockman.run(); });
+    auto sockman = make_shared<SocketManager>();
+    sockman->add(chan);
+    thread t([&]() { sockman->run(); });
 
     auto f = simpleCallAsync(chan, client, 1);
     f.get();
 
     server.stop(chan, client);
-    sockman.stop();
+    sockman->stop();
     t.join();
 }
 
@@ -638,16 +639,16 @@ TEST_F(ChannelTest, StreamAsyncTimeout)
     auto chan = make_shared<StreamChannel>(clsock);
 
     // Read replies asynchronously using a SockerManager.
-    SocketManager sockman;
-    sockman.add(chan);
-    chan->setTimeoutManager(&sockman);
-    thread t([&]() { sockman.run(); });
+    auto sockman = make_shared<SocketManager>();
+    sockman->add(chan);
+    chan->setTimeoutManager(sockman.get());
+    thread t([&]() { sockman->run(); });
 
     auto f = simpleCallAsync(chan, client, 1, 5ms);
     std::this_thread::sleep_for(10ms);
     EXPECT_THROW(f.get(), TimeoutError);
 
-    sockman.stop();
+    sockman->stop();
     t.join();
 }
 

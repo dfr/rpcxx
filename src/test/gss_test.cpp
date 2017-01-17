@@ -11,6 +11,7 @@
 #include <rpc++/cred.h>
 #include <rpc++/server.h>
 #include <rpc++/socket.h>
+#include <rpc++/sockman.h>
 
 #include <gflags/gflags.h>
 #include <gtest/gtest.h>
@@ -225,9 +226,9 @@ TEST_F(GssTest, StreamManyThreads)
     auto schan = make_shared<StreamChannel>(sockpair[0], svcreg);
     auto cchan = make_shared<StreamChannel>(sockpair[1]);
 
-    SocketManager sockman;
-    sockman.add(schan);
-    thread t([&]() { sockman.run(); });
+    auto sockman = make_shared<SocketManager>();
+    sockman->add(schan);
+    thread t([&]() { sockman->run(); });
 
     int threadCount = 20;
     int iterations = 200;
@@ -243,7 +244,7 @@ TEST_F(GssTest, StreamManyThreads)
         t.join();
 
     cchan->close();
-    sockman.stop();
+    sockman->stop();
     t.join();
 }
 

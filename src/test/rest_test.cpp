@@ -7,6 +7,7 @@
 #include <rpc++/json.h>
 #include <rpc++/rest.h>
 #include <rpc++/server.h>
+#include <rpc++/sockman.h>
 #include <rpc++/xml.h>
 #include <gtest/gtest.h>
 #include <glog/logging.h>
@@ -362,12 +363,12 @@ TEST_F(RestTest, ReceiveRest)
     auto restreg = make_shared<RestRegistry>();
 
     // Make a local socket to listen on
-    SocketManager sockman;
+    auto sockman = make_shared<SocketManager>();
     auto ssock = make_shared<StreamChannel>(sockpair[0], svcreg, restreg);
-    sockman.add(ssock);
+    sockman->add(ssock);
 
     // Process the server side on a thread
-    thread t([&]() { sockman.run(); });
+    thread t([&]() { sockman->run(); });
 
     auto chan = make_shared<Socket>(sockpair[1]);
     string message =
@@ -385,7 +386,7 @@ TEST_F(RestTest, ReceiveRest)
     EXPECT_EQ(404, res->status());
     EXPECT_EQ("Not Found", res->reason());
 
-    sockman.stop();
+    sockman->stop();
     t.join();
 }
 
@@ -398,12 +399,12 @@ TEST_F(RestTest, PostContentLength)
     auto restreg = make_shared<RestRegistry>();
 
     // Make a local socket to listen on
-    SocketManager sockman;
+    auto sockman = make_shared<SocketManager>();
     auto ssock = make_shared<StreamChannel>(sockpair[0], svcreg, restreg);
-    sockman.add(ssock);
+    sockman->add(ssock);
 
     // Process the server side on a thread
-    thread t([&]() { sockman.run(); });
+    thread t([&]() { sockman->run(); });
 
     auto chan = make_shared<Socket>(sockpair[1]);
     string message =
@@ -422,7 +423,7 @@ TEST_F(RestTest, PostContentLength)
     EXPECT_EQ(404, res->status());
     EXPECT_EQ("Not Found", res->reason());
 
-    sockman.stop();
+    sockman->stop();
     t.join();
 }
 
@@ -435,12 +436,12 @@ TEST_F(RestTest, PostChunked)
     auto restreg = make_shared<RestRegistry>();
 
     // Make a local socket to listen on
-    SocketManager sockman;
+    auto sockman = make_shared<SocketManager>();
     auto ssock = make_shared<StreamChannel>(sockpair[0], svcreg, restreg);
-    sockman.add(ssock);
+    sockman->add(ssock);
 
     // Process the server side on a thread
-    thread t([&]() { sockman.run(); });
+    thread t([&]() { sockman->run(); });
 
     auto chan = make_shared<Socket>(sockpair[1]);
     string message =
@@ -467,6 +468,6 @@ TEST_F(RestTest, PostChunked)
     EXPECT_EQ(404, res->status());
     EXPECT_EQ("Not Found", res->reason());
 
-    sockman.stop();
+    sockman->stop();
     t.join();
 }
